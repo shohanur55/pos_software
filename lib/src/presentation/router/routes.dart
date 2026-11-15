@@ -1,6 +1,7 @@
 abstract final class Routes {
   static const String splash = '/splash';
   static const String login = '/login';
+  static const String signup = '/signup';
   static const String home = '/home';
   static const String upload = '/home/upload';
   static const String files = '/home/files';
@@ -8,6 +9,7 @@ abstract final class Routes {
 
   static const String splashName = 'splash';
   static const String loginName = 'login';
+  static const String signupName = 'signup';
   static const String uploadName = 'upload';
   static const String filesName = 'files';
   static const String transfersName = 'transfers';

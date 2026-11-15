@@ -8,7 +8,8 @@ import '../../../utils/ui_messages.dart';
 import '../../../widgets/typography/app_text.dart';
 
 /// Tells the user how fresh the list is: syncing, synced a moment ago, or
-/// an offline copy. A POS user needs to know whether what they see is real.
+/// an offline copy. Rendered as a pill with an icon and a tone-matched tint —
+/// a POS operator needs to know whether what they see is real.
 class FilesSyncBar extends StatelessWidget {
   const FilesSyncBar({super.key});
 
@@ -18,34 +19,62 @@ class FilesSyncBar extends StatelessWidget {
     if (!state.visible) return const SizedBox.shrink();
 
     final colors = context.color;
-    final (icon, label, color) = switch (state) {
+    final (icon, label, fg, bg) = switch (state) {
       _SyncView(refreshing: true) => (
         Icons.sync_rounded,
         AppStrings.syncing,
-        colors.textSecondary,
+        colors.primary,
+        colors.primaryContainer,
       ),
       _SyncView(stale: true) => (
         Icons.cloud_off_rounded,
         AppStrings.showingOfflineCopy,
-        colors.warning,
+        colors.onWarningContainer,
+        colors.warningContainer,
       ),
       _ => (
         Icons.cloud_done_outlined,
         _syncedLabel(state.syncedAt),
-        colors.textSecondary,
+        colors.onSuccessContainer,
+        colors.successContainer,
       ),
     };
 
     return Padding(
-      padding: context.padding.banner,
-      child: Row(
-        children: [
-          Icon(icon, size: context.sizes.iconSm, color: color),
-          SizedBox(width: context.spacing.sm),
-          Expanded(child: BodySmallText(label, color: color, maxLines: 1)),
-          if (state.stale && state.syncedAt != null)
-            BodySmallText(_syncedLabel(state.syncedAt), maxLines: 1),
-        ],
+      padding: EdgeInsets.fromLTRB(
+        context.spacing.lg,
+        context.spacing.sm,
+        context.spacing.lg,
+        context.spacing.xs,
+      ),
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.spacing.md,
+          vertical: context.spacing.sm,
+        ),
+        decoration: BoxDecoration(color: bg, borderRadius: context.radius.pill),
+        child: Row(
+          children: [
+            Icon(icon, size: context.sizes.iconSm, color: fg),
+            SizedBox(width: context.spacing.sm),
+            Expanded(
+              child: LabelSmallText(
+                label,
+                color: fg,
+                fontWeight: FontWeight.w700,
+                maxLines: 1,
+              ),
+            ),
+            if (state.stale && state.syncedAt != null) ...[
+              SizedBox(width: context.spacing.sm),
+              LabelSmallText(
+                _syncedLabel(state.syncedAt),
+                color: fg.withValues(alpha: 0.8),
+                maxLines: 1,
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

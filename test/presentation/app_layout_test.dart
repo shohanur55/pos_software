@@ -6,6 +6,7 @@ import 'package:pos_software/src/domain/entities/picked_file_entity.dart';
 import 'package:pos_software/src/domain/entities/remote_file_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_error_kind.dart';
+import 'package:pos_software/src/domain/entities/transfer_pause_reason.dart';
 import 'package:pos_software/src/domain/entities/transfer_status.dart';
 import 'package:pos_software/src/domain/entities/transfer_type.dart';
 import 'package:pos_software/src/domain/entities/upload_validation_error.dart';
@@ -58,6 +59,23 @@ void main() {
             : null,
         createdAt: fixedNow.subtract(Duration(minutes: index * 7)),
         updatedAt: fixedNow.subtract(Duration(minutes: index * 7)),
+      ),
+    // Paused carries the longest copy in the app — it has to say why it
+    // stopped and what resuming will cost — so both readings get a row.
+    for (final (index, reason) in TransferPauseReason.values.indexed)
+      TransferEntity(
+        id: 'paused-$index',
+        type: index.isEven ? TransferType.download : TransferType.upload,
+        fileName: longName,
+        remoteFileName: longName,
+        status: TransferStatus.paused,
+        pauseReason: reason,
+        progress: 0.37,
+        totalBytes: 480 * 1024 * 1024,
+        transferredBytes: 177 * 1024 * 1024,
+        canPauseNatively: index.isEven,
+        createdAt: fixedNow.subtract(const Duration(hours: 2)),
+        updatedAt: fixedNow.subtract(const Duration(hours: 2)),
       ),
   ];
 

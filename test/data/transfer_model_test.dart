@@ -3,6 +3,7 @@ import 'package:pos_software/src/data/models/transfer_events.dart';
 import 'package:pos_software/src/data/models/transfer_model.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_error_kind.dart';
+import 'package:pos_software/src/domain/entities/transfer_pause_reason.dart';
 import 'package:pos_software/src/domain/entities/transfer_status.dart';
 import 'package:pos_software/src/domain/entities/transfer_type.dart';
 
@@ -140,5 +141,91 @@ void main() {
   test('unknown enum names in stored json do not crash', () {
     final json = model.toJson()..['errorKind'] = 'somethingNew';
     expect(TransferModel.fromJson(json).errorKind, isNull);
+  });
+
+  group('resuming an upload from an offset', () {
+    final paused = model.copyWith(
+      status: TransferStatus.paused,
+      pauseReason: TransferPauseReason.noNetwork,
+      progress: 0.8,
+      transferredBytes: 800,
+    );
+
+    test('resumedWith keeps the progress already made', () {
+      final resumed = paused.resumedWith('task-2', 800, now);
+
+      expect(resumed.taskId, 'task-2');
+      expect(resumed.status, TransferStatus.queued);
+      expect(resumed.resumeFromByte, 800);
+      expect(resumed.transferredBytes, 800);
+      expect(resumed.progress, 0.8);
+      expect(resumed.pauseReason, isNull);
+    });
+
+    test('restartedWith drops the offset, because it starts over', () {
+      final restarted = paused.restartedWith('task-2', now);
+
+      expect(restarted.resumeFromByte, 0);
+      expect(restarted.transferredBytes, 0);
+      expect(restarted.progress, 0);
+      expect(restarted.pauseReason, isNull);
+    });
+
+    test('progress from a resumed task is rebased onto the whole file', () {
+      final resumed = paused.resumedWith('task-2', 800, now);
+
+      // The native task is halfway through the 200 bytes it was given, which
+      // is 900 of 1000 bytes of the file — not 50%.
+      final ticked = resumed.applyProgress(
+        const TransferProgressEvent('task-2', null, progress: 0.5),
+        now,
+      );
+
+      expect(ticked.progress, 0.9);
+      expect(ticked.transferredBytes, 900);
+    });
+
+    test(
+      'a resumed task reporting only the remainder cannot shrink the file',
+      () {
+        final resumed = paused.resumedWith('task-2', 800, now);
+
+        final ticked = resumed.applyProgress(
+          // 200 bytes is what this task sends, not what the file holds.
+          const TransferProgressEvent(
+            'task-2',
+            null,
+            progress: 0.5,
+            expectedBytes: 200,
+          ),
+          now,
+        );
+
+        expect(ticked.totalBytes, 1000);
+      },
+    );
+
+    test('an ordinary upload is unaffected by the rebasing', () {
+      final ticked = model.applyProgress(
+        const TransferProgressEvent('task', null, progress: 0.25),
+        now,
+      );
+
+      expect(ticked.progress, 0.25);
+      expect(ticked.transferredBytes, 250);
+    });
+
+    test('the pause reason survives a round trip through storage', () {
+      final restored = TransferModel.fromJson(paused.toJson());
+
+      expect(restored.pauseReason, TransferPauseReason.noNetwork);
+      expect(restored.isWaitingForNetwork, isTrue);
+    });
+
+    test('an unknown pause reason in stored json does not crash', () {
+      final json = paused.toJson()..['pauseReason'] = 'somethingNew';
+
+      expect(TransferModel.fromJson(json).pauseReason, isNull);
+    });
   });
 }

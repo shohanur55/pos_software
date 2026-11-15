@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import 'transfer_error_kind.dart';
+import 'transfer_pause_reason.dart';
 import 'transfer_status.dart';
 import 'transfer_type.dart';
 
@@ -24,6 +25,8 @@ class TransferEntity extends Equatable {
     this.errorKind,
     this.errorMessage,
     this.canPauseNatively = false,
+    this.pauseReason,
+    this.resumeFromByte = 0,
   }) : progress = progress < 0 ? 0 : (progress > 1 ? 1 : progress);
 
   /// Stable id that survives retries and upload restarts.
@@ -56,11 +59,32 @@ class TransferEntity extends Equatable {
   final String? errorMessage;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Downloads only: the server answered a range request, so the partial file
+  /// on disk can be continued instead of fetched again.
   final bool canPauseNatively;
+
+  /// Only meaningful while [status] is paused.
+  final TransferPauseReason? pauseReason;
+
+  /// Uploads only: the byte offset the server confirmed it already holds.
+  /// Zero means a resume has to send the file from the start.
+  final int resumeFromByte;
 
   bool get isUpload => type == TransferType.upload;
 
   bool get isDownload => type == TransferType.download;
+
+  /// Whether resuming continues from where the transfer stopped rather than
+  /// starting the file over. Downloads rely on HTTP range requests, uploads
+  /// on the endpoint accepting an offset.
+  bool get resumesWhereItStopped =>
+      isDownload ? canPauseNatively : resumeFromByte > 0;
+
+  /// Parked by a dropped connection and waiting for it to come back.
+  bool get isWaitingForNetwork =>
+      status == TransferStatus.paused &&
+      pauseReason == TransferPauseReason.noNetwork;
 
   @override
   List<Object?> get props => [
@@ -82,5 +106,7 @@ class TransferEntity extends Equatable {
     createdAt,
     updatedAt,
     canPauseNatively,
+    pauseReason,
+    resumeFromByte,
   ];
 }

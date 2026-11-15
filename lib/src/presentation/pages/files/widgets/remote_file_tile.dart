@@ -36,15 +36,23 @@ class RemoteFileTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.color;
     final subtitle = _subtitle(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      padding: context.padding.tile,
+      padding: EdgeInsets.all(context.spacing.md),
       decoration: BoxDecoration(
         color: colors.surface,
         borderRadius: context.radius.lg,
         border: Border.all(
-          color: colors.outline,
+          color: colors.outline.withValues(alpha: 0.55),
           width: context.sizes.borderWidth,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.025),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       // Only this tile rebuilds while its own download ticks.
       child: BlocSelector<TransferBloc, TransferState, TransferEntity?>(

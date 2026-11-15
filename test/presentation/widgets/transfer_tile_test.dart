@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_error_kind.dart';
+import 'package:pos_software/src/domain/entities/transfer_pause_reason.dart';
 import 'package:pos_software/src/domain/entities/transfer_status.dart';
 import 'package:pos_software/src/domain/entities/transfer_type.dart';
 import 'package:pos_software/src/presentation/theme/app_theme.dart';
@@ -20,13 +21,31 @@ void main() {
       ['Downloading', '42%'],
       [TransferAction.pause, TransferAction.cancel],
     ),
-    'paused upload': (
+    'paused upload that has to start over': (
       transfer(
         fileName: longName,
         status: TransferStatus.paused,
         progress: 0.3,
+        pauseReason: TransferPauseReason.user,
       ),
-      ['Paused', 'Upload restarts from the beginning.'],
+      ['Paused', 'Starts again from the beginning when resumed.'],
+      [TransferAction.resume, TransferAction.cancel],
+    ),
+    'download parked by a dropped connection': (
+      transfer(
+        fileName: longName,
+        type: TransferType.download,
+        status: TransferStatus.paused,
+        progress: 0.3,
+        totalBytes: 80 * 1000 * 1000,
+        canPauseNatively: true,
+        pauseReason: TransferPauseReason.noNetwork,
+      ),
+      [
+        'Waiting for internet',
+        'No internet. Continues from 22.9 MB as soon as the connection is '
+            'back.',
+      ],
       [TransferAction.resume, TransferAction.cancel],
     ),
     'failed': (

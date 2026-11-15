@@ -1,5 +1,6 @@
 import '../../core/base/failure.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/utils/byte_formatter.dart';
 import '../../core/utils/duration_formatter.dart';
 import '../../domain/entities/transfer_entity.dart';
 import '../../domain/entities/transfer_error_kind.dart';
@@ -35,6 +36,7 @@ abstract final class UiMessages {
     TransferErrorKind.server => AppStrings.errorServer,
     TransferErrorKind.storage => AppStrings.errorStorage,
     TransferErrorKind.resumeFailed => AppStrings.errorResumeFailed,
+    TransferErrorKind.resumeNotSupported => AppStrings.errorResumeNotSupported,
     TransferErrorKind.unknown || null => AppStrings.errorUnknown,
   };
 
@@ -55,12 +57,36 @@ abstract final class UiMessages {
           transfer.isUpload
               ? AppStrings.statusUploading
               : AppStrings.statusDownloading,
-        TransferStatus.paused => AppStrings.statusPaused,
+        TransferStatus.paused =>
+          transfer.isWaitingForNetwork
+              ? AppStrings.statusPausedNoNetwork
+              : AppStrings.statusPaused,
         TransferStatus.waitingToRetry => AppStrings.statusWaitingToRetry,
         TransferStatus.completed => AppStrings.statusCompleted,
         TransferStatus.failed => AppStrings.statusFailed,
         TransferStatus.canceled => AppStrings.statusCanceled,
       };
+
+  /// What a paused transfer will do when it starts again, or `null` when it
+  /// is not paused.
+  ///
+  /// Stating this while the transfer sits still is the whole point: an
+  /// operator deciding whether to wait for the shop Wi-Fi or walk the terminal
+  /// to a different one needs to know whether the 400 MB already sent survives
+  /// the wait.
+  static String? pausedDetail(TransferEntity transfer) {
+    if (transfer.status != TransferStatus.paused) return null;
+    final keepsPlace = transfer.resumesWhereItStopped;
+    final position = ByteFormatter.format(transfer.transferredBytes);
+    if (transfer.isWaitingForNetwork) {
+      return keepsPlace
+          ? AppStrings.offlineResumesFrom(position)
+          : AppStrings.offlineStartsOver;
+    }
+    return keepsPlace
+        ? AppStrings.pausedResumesFrom(position)
+        : AppStrings.pausedStartsOver;
+  }
 
   static String timeLeft(Duration duration) {
     final remaining = DurationFormatter.remaining(duration);

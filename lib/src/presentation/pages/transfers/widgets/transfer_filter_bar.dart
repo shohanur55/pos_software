@@ -7,6 +7,8 @@ import '../../../theme/theme_extensions.dart';
 import '../../../widgets/typography/app_text.dart';
 import '../transfer_filter.dart';
 
+/// Horizontal strip of filter chips, each with its running count. Styled from
+/// the ambient theme so the selected chip reads clearly in both modes.
 class TransferFilterBar extends StatelessWidget {
   const TransferFilterBar({
     super.key,
@@ -37,6 +39,7 @@ class TransferFilterBar extends StatelessWidget {
       TransferFilter.failed => AppStrings.filterFailed(counts.failed),
     };
 
+    final colors = context.color;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: context.padding.tile,
@@ -44,9 +47,25 @@ class TransferFilterBar extends StatelessWidget {
         children: [
           for (final filter in TransferFilter.values) ...[
             ChoiceChip(
-              label: LabelText(label(filter)),
+              label: LabelText(
+                label(filter),
+                color: filter == selected
+                    ? colors.onPrimary
+                    : colors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
               selected: filter == selected,
               onSelected: (_) => onSelected(filter),
+              selectedColor: colors.primary,
+              backgroundColor: colors.surfaceContainer,
+              side: BorderSide(
+                color: filter == selected
+                    ? colors.primary
+                    : colors.outline.withValues(alpha: 0.5),
+              ),
+              checkmarkColor: colors.onPrimary,
+              showCheckmark: false,
+              shape: RoundedRectangleBorder(borderRadius: context.radius.pill),
             ),
             SizedBox(width: context.spacing.sm),
           ],

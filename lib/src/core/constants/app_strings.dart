@@ -25,11 +25,18 @@ abstract final class AppStrings {
   static const String showPassword = 'Show password';
   static const String hidePassword = 'Hide password';
   static const String loginButton = 'Log in';
-  static const String registerPrompt =
-      'Don\'t have an account? Create one on the web portal:';
-  static const String openPortal = 'Open the web portal';
+  static const String registerPrompt = 'New to POS Software?';
+  static const String registerCta = 'Create an account';
+  static const String openPortal = 'Open the sign-up portal';
+  static const String signupTitle = 'Create account';
+  static const String backToLogin = 'Back to login';
+  static const String reload = 'Reload';
+  static const String signupLoadFailedTitle = 'Can\'t load the portal';
+  static const String signupLoadFailedBody =
+      'Check your connection and try again.';
   static String errorCannotOpenPortal(String address) =>
-      'Couldn\'t open a browser. Visit $address to create an account.';
+      'Couldn\'t open the sign-up portal. Visit $address in your browser instead.';
+  static const String splashTagline = 'Fast file transfers at the counter';
   static const String sessionExpired =
       'Your session has expired. Please log in again.';
   static const String logoutConfirmTitle = 'Log out?';
@@ -56,7 +63,10 @@ abstract final class AppStrings {
   static const String errorStorage =
       'Not enough storage space to save this file.';
   static const String errorResumeFailed =
-      'Couldn\'t resume. Restarting from the beginning.';
+      'Couldn\'t continue where it stopped. Starting again from the beginning.';
+  static const String errorResumeNotSupported =
+      'This server can\'t continue an interrupted upload, so it starts again '
+      'from the beginning.';
   static const String errorAlreadyDownloading =
       'This file is already downloading.';
   static String errorCannotOpen(String path) =>
@@ -78,8 +88,11 @@ abstract final class AppStrings {
       '${count == 1 ? '1 transfer' : '$count transfers'} in progress · $percent%';
   static String miniBannerFailed(int count) =>
       count == 1 ? '1 transfer failed' : '$count transfers failed';
+  // Covers both halves of what the app actually detects: no network at all,
+  // and a network that cannot reach the server.
   static const String offlineBanner =
-      'You\'re offline. Transfers will continue when the connection is back.';
+      'No connection to the server. Transfers are on hold and continue by '
+      'themselves once it is back.';
   static const String notificationsOffBanner =
       'Notifications are off, so you won\'t see progress in the status bar.';
   static const String uploadTitle = 'Upload a file';
@@ -91,7 +104,20 @@ abstract final class AppStrings {
   static const String uploadRemoveFile = 'Remove file';
   static const String uploadBackgroundHint =
       'You can leave this screen. The upload continues in the background.';
-  static const String uploadRestartNote = 'Upload restarts from the beginning.';
+  static String pausedResumesFrom(String position) =>
+      'Continues from $position when resumed.';
+  static const String pausedStartsOver =
+      'Starts again from the beginning when resumed.';
+  static String offlineResumesFrom(String position) =>
+      'No internet. Continues from $position as soon as the connection is '
+      'back.';
+  static const String offlineStartsOver =
+      'No internet. Starts again from the beginning as soon as the connection '
+      'is back.';
+  static String pausedByNetworkSnack(String name) =>
+      'Connection lost. $name is on hold and continues by itself.';
+  static String resumedFromSnack(String name, String position) =>
+      'Back online. $name continues from $position.';
   static const String uploadDone = 'Uploaded';
   static const String uploadViewInFiles = 'View in Files';
   static const String uploadAnother = 'Upload another';
@@ -110,6 +136,7 @@ abstract final class AppStrings {
   static const String statusUploading = 'Uploading';
   static const String statusDownloading = 'Downloading';
   static const String statusPaused = 'Paused';
+  static const String statusPausedNoNetwork = 'Waiting for internet';
   static const String statusWaitingToRetry = 'Waiting for network';
   static const String statusWaitingDetail = 'Waiting for network, retrying...';
   static const String statusCompleted = 'Completed';
@@ -140,6 +167,10 @@ abstract final class AppStrings {
   static String filterActive(int count) => 'Active ($count)';
   static String filterCompleted(int count) => 'Completed ($count)';
   static String filterFailed(int count) => 'Failed ($count)';
+  static const String filterAllLabel = 'All';
+  static const String filterActiveLabel = 'Active';
+  static const String filterCompletedLabel = 'Completed';
+  static const String filterFailedLabel = 'Failed';
   static const String clearFinished = 'Clear finished';
   static const String transfersEmpty =
       'No transfers yet. Uploads and downloads will show up here.';

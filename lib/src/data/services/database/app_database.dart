@@ -10,7 +10,10 @@ class AppDatabase {
     : _factory = factory ?? databaseFactory,
       _path = path ?? '';
 
-  static const int schemaVersion = 1;
+  /// 1 — first release.
+  /// 2 — `pauseReason` and `resumeFromByte`, for transfers parked by a dropped
+  ///     connection and for uploads that continue from an offset.
+  static const int schemaVersion = 2;
   static const String fileName = 'pos_transfers.db';
 
   static const String transfersTable = 'transfers';
@@ -32,6 +35,7 @@ class AppDatabase {
       options: OpenDatabaseOptions(
         version: schemaVersion,
         onCreate: (db, version) => _createSchema(db),
+        onUpgrade: _upgrade,
       ),
     );
   }
@@ -55,6 +59,8 @@ class AppDatabase {
           errorKind TEXT,
           errorMessage TEXT,
           canPauseNatively INTEGER NOT NULL DEFAULT 0,
+          pauseReason TEXT,
+          resumeFromByte INTEGER NOT NULL DEFAULT 0,
           pendingFinalize INTEGER NOT NULL DEFAULT 0,
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
@@ -73,6 +79,23 @@ class AppDatabase {
           cachedAt TEXT NOT NULL
         )
       ''');
+    await batch.commit(noResult: true);
+  }
+
+  /// Runs each step between the installed version and the current one, so an
+  /// app that skipped a release still arrives at the right schema. Without
+  /// this an upgrade opens an old table and every write fails on a missing
+  /// column — on a terminal that is already in a shop, with history in it.
+  Future<void> _upgrade(Database db, int from, int to) async {
+    final batch = db.batch();
+    if (from < 2) {
+      batch
+        ..execute('ALTER TABLE $transfersTable ADD COLUMN pauseReason TEXT')
+        ..execute(
+          'ALTER TABLE $transfersTable '
+          'ADD COLUMN resumeFromByte INTEGER NOT NULL DEFAULT 0',
+        );
+    }
     await batch.commit(noResult: true);
   }
 

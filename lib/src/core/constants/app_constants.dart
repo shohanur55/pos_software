@@ -7,6 +7,10 @@ abstract final class AppConstants {
   /// Private working folder for in-flight downloads.
   static const String transferFolderName = 'transfers';
 
+  /// Private folder holding the picker's copy of a file being uploaded, for
+  /// as long as the upload might still need it.
+  static const String uploadSourceFolderName = 'upload_sources';
+
   static const double compactBreakpoint = 840;
   static const double maxContentWidth = 720;
 }

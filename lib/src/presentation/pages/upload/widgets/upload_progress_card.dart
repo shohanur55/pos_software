@@ -43,58 +43,78 @@ class UploadProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.color;
     return Card(
-      child: Padding(
-        padding: context.padding.card,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 4,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  colors.primary,
+                  colors.primary.withValues(alpha: 0.35),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: context.padding.card,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                FileTypeIcon(fileName: transfer.fileName),
-                SizedBox(width: context.spacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TitleText(transfer.fileName, maxLines: 2),
-                      SizedBox(height: context.spacing.xs),
-                      TransferStatusChip(transfer: transfer),
-                    ],
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FileTypeIcon(fileName: transfer.fileName),
+                    SizedBox(width: context.spacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TitleText(transfer.fileName, maxLines: 2),
+                          SizedBox(height: context.spacing.xs),
+                          TransferStatusChip(transfer: transfer),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: context.spacing.lg),
+                _PercentRow(transfer: transfer),
+                SizedBox(height: context.spacing.sm),
+                TransferProgressBar(transfer: transfer),
+                SizedBox(height: context.spacing.lg),
+                TransferStatsRow(transfer: transfer),
+                if (transfer.status == TransferStatus.waitingToRetry) ...[
+                  SizedBox(height: context.spacing.md),
+                  BodySmallText(
+                    AppStrings.statusWaitingDetail,
+                    color: colors.warning,
+                  ),
+                ],
+                if (UiMessages.pausedDetail(transfer) case final detail?) ...[
+                  SizedBox(height: context.spacing.md),
+                  BodySmallText(
+                    detail,
+                    color: transfer.resumesWhereItStopped
+                        ? colors.textSecondary
+                        : colors.warning,
+                    maxLines: 3,
+                  ),
+                ],
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: TransferActionButtons(
+                    transfer: transfer,
+                    exclude: const {TransferAction.open, TransferAction.remove},
+                    onAction: (action) => _onAction(context, action),
                   ),
                 ),
               ],
             ),
-            SizedBox(height: context.spacing.lg),
-            _PercentRow(transfer: transfer),
-            SizedBox(height: context.spacing.sm),
-            TransferProgressBar(transfer: transfer),
-            SizedBox(height: context.spacing.lg),
-            TransferStatsRow(transfer: transfer),
-            if (transfer.status == TransferStatus.waitingToRetry) ...[
-              SizedBox(height: context.spacing.md),
-              BodySmallText(
-                AppStrings.statusWaitingDetail,
-                color: colors.warning,
-              ),
-            ],
-            if (transfer.status == TransferStatus.paused) ...[
-              SizedBox(height: context.spacing.md),
-              BodySmallText(
-                AppStrings.uploadRestartNote,
-                color: colors.warning,
-              ),
-            ],
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: TransferActionButtons(
-                transfer: transfer,
-                exclude: const {TransferAction.open, TransferAction.remove},
-                onAction: (action) => _onAction(context, action),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

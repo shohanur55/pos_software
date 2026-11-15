@@ -4,6 +4,7 @@ import 'package:stream_transform/stream_transform.dart';
 
 import '../../../core/base/failure.dart';
 import '../../../core/base/result.dart';
+import '../../../core/utils/byte_formatter.dart';
 import '../../../domain/entities/remote_file_entity.dart';
 import '../../../domain/entities/transfer_entity.dart';
 import '../../../domain/entities/transfer_error_kind.dart';
@@ -186,12 +187,17 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
   ) async {
     final result = await _resumeTransfer(event.id);
     switch (result) {
+      // A resume that could not keep its place has to say so; the row is
+      // running again either way, so nothing else on screen would show it.
       case Success(:final data)
-          when data.errorKind == TransferErrorKind.resumeFailed:
+          when data.errorKind == TransferErrorKind.resumeFailed ||
+              data.errorKind == TransferErrorKind.resumeNotSupported:
         emit(
           state.copyWith(
             notice: _notice(
-              TransferNoticeKind.resumeRestarting,
+              data.errorKind == TransferErrorKind.resumeNotSupported
+                  ? TransferNoticeKind.resumeNotSupported
+                  : TransferNoticeKind.resumeRestarting,
               subject: data.fileName,
             ),
           ),
@@ -271,6 +277,14 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
         transfer.status == TransferStatus.failed &&
         previous?.status != TransferStatus.failed;
 
+    // The repository parks running transfers when the route to the server
+    // disappears, and starts them again by itself when it comes back. Both are
+    // things that happened *to* the operator's work, so both are announced.
+    final justParked =
+        transfer.isWaitingForNetwork && previous?.isWaitingForNetwork != true;
+    final justBackOnline =
+        previous?.isWaitingForNetwork == true && transfer.status.isActive;
+
     UiNotice<TransferNoticeKind>? notice;
     if (justCompleted && previous != null) {
       notice = _notice(
@@ -282,6 +296,19 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
     } else if (justFailed &&
         transfer.errorKind == TransferErrorKind.unauthorized) {
       notice = _notice(TransferNoticeKind.unauthorized);
+    } else if (justParked) {
+      notice = _notice(
+        TransferNoticeKind.pausedByNetwork,
+        subject: transfer.fileName,
+      );
+    } else if (justBackOnline) {
+      notice = _notice(
+        transfer.resumesWhereItStopped
+            ? TransferNoticeKind.resumedFromOffset
+            : TransferNoticeKind.autoResumed,
+        subject: transfer.fileName,
+        detail: ByteFormatter.format(transfer.transferredBytes),
+      );
     }
     emit(state.copyWith(transfers: transfers, notice: notice));
   }
@@ -310,7 +337,8 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
   UiNotice<TransferNoticeKind> _notice(
     TransferNoticeKind kind, {
     String? subject,
-  }) => UiNotice(kind, ++_noticeId, subject: subject);
+    String? detail,
+  }) => UiNotice(kind, ++_noticeId, subject: subject, detail: detail);
 
   static List<TransferEntity> _ordered(Iterable<TransferEntity> transfers) {
     return transfers.toList()..sort((a, b) {

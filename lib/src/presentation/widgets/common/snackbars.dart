@@ -107,7 +107,9 @@ class _SnackPalette {
       SnackBarTone.info => _SnackPalette(
         background: colors.primaryContainer,
         foreground: colors.onPrimaryContainer,
-        accent: colors.primary,
+        // Keep the accent high-contrast against primaryContainer — the brand
+        // green itself is too close to the container to clear WCAG AA.
+        accent: colors.onPrimaryContainer,
         icon: Icons.info_outline_rounded,
         duration: const Duration(seconds: 4),
       ),

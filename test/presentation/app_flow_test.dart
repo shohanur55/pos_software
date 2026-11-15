@@ -77,33 +77,25 @@ void main() {
   }
 
   group('Login screen', () {
-    testWidgets('the server address opens the web portal', (tester) async {
+    testWidgets('the sign-up button pushes the in-app portal', (tester) async {
       await app.register();
 
       await launch(tester);
 
-      await tester.tap(find.text('http://server.test:90'));
-      await settle(tester);
+      // The whole portal card is tappable; find it by its label copy and tap
+      // once at its centre to push the sign-up route.
+      await tester.tap(find.text('Create an account'));
+      // One pump is enough for GoRouter to swap the configuration; we stop
+      // before the WebView tries to bind to a platform plugin, which is not
+      // available in tests. Any exception raised by that render is drained.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      tester.takeException();
 
-      verify(() => app.auth.openRegistrationPortal()).called(1);
-      await finish(tester);
-    });
-
-    testWidgets('falls back to the address in text when no browser opens', (
-      tester,
-    ) async {
-      await app.register();
-      when(
-        () => app.auth.openRegistrationPortal(),
-      ).thenAnswer((_) async => const Error(Failure(FailureKind.cannotOpen)));
-
-      await launch(tester);
-      await tester.tap(find.text('http://server.test:90'));
-      await settle(tester);
-
+      final router = sl<AppRouter>().router;
       expect(
-        find.textContaining('Visit http://server.test:90'),
-        findsOneWidget,
+        router.routerDelegate.currentConfiguration.uri.toString(),
+        Routes.signup,
       );
       await finish(tester);
     });
@@ -269,7 +261,8 @@ void main() {
         await launch(tester);
         expect(
           find.text(
-            "You're offline. Transfers will continue when the connection is back.",
+            'No connection to the server. Transfers are on hold and continue '
+            'by themselves once it is back.',
           ),
           findsOneWidget,
         );

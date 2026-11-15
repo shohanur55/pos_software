@@ -38,15 +38,33 @@ class TransferTile extends StatelessWidget {
         transfer.status != TransferStatus.completed &&
         transfer.status != TransferStatus.canceled;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       decoration: BoxDecoration(
         color: highlighted ? colors.highlight : colors.surface,
         borderRadius: context.radius.lg,
         border: Border.all(
-          color: highlighted ? colors.primary : colors.outline,
-          width: context.sizes.borderWidth,
+          color: highlighted
+              ? colors.primary
+              : colors.outline.withValues(alpha: 0.55),
+          width: highlighted ? 1.6 : context.sizes.borderWidth,
         ),
+        boxShadow: highlighted
+            ? [
+                BoxShadow(
+                  color: colors.primary.withValues(alpha: 0.18),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.20 : 0.03),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       padding: context.padding.card,
       child: Column(
@@ -83,10 +101,15 @@ class TransferTile extends StatelessWidget {
               color: colors.warning,
             ),
           ],
-          if (transfer.isUpload &&
-              transfer.status == TransferStatus.paused) ...[
+          if (UiMessages.pausedDetail(transfer) case final detail?) ...[
             SizedBox(height: context.spacing.sm),
-            BodySmallText(AppStrings.uploadRestartNote, color: colors.warning),
+            BodySmallText(
+              detail,
+              color: transfer.resumesWhereItStopped
+                  ? colors.textSecondary
+                  : colors.warning,
+              maxLines: 3,
+            ),
           ],
           if (transfer.status == TransferStatus.completed &&
               transfer.savedPath != null) ...[

@@ -33,7 +33,7 @@ Before trusting a change:
 ```sh
 dart format .
 flutter analyze                 # should come back clean
-flutter test                    # 243 tests, no device needed
+flutter test                    # 285 tests, no device needed
 flutter build apk --debug
 ```
 
@@ -109,6 +109,13 @@ write to SQLite several times a second.
 repository returns to follow that specific upload's progress. `TransferBloc` learns about
 the upload from the repository stream, the same way it learns about anything else.
 
+**The repository watches the connection, not the UI.** Parking transfers when the route
+disappears has to happen whether or not anyone is looking at the Transfers tab, so
+`TransferRepositoryImpl` holds the subscription itself. `ConnectivityCubit` still exists,
+but only to draw the offline banner. The repository also owns the one thing that makes
+that safe: all of it goes through the same serialized queue as native events and user
+taps, so a park, a resume and a progress tick can never interleave halfway through.
+
 **Progress is throttled; status isn't.** Progress callbacks can fire many times a second,
 so they're capped at roughly 4/s per task. And because native callbacks and user taps both
 mutate the same transfer map, every mutation goes through one serialized queue.
@@ -131,6 +138,17 @@ emulator:
 - `GET /get?file=NAME` → served the 60 MB file. Sent a `Range: bytes=X-` header mid-way
   through and the server honoured it, so download pause/resume works against this server.
 - `GET /register` → `405`. Registration is server-rendered only; the app can't do it.
+- The upload size cap is the server's, and it's close to ours. Sending just a
+  `Content-Length` header (nginx rejects on the header, before reading a body) and
+  bisecting: `512 MB` → `100 Continue`, `600 MB` → `413`, boundary at roughly **520 MiB**.
+  The app's own 512 MiB limit sits just under it, so a file that passes validation is one
+  the server will accept — multipart overhead included. What this can't tell you is PHP's
+  `upload_max_filesize`, which sits behind nginx and could be lower; a 60 MB upload is the
+  largest I've actually confirmed end to end.
+- `POST /upload` with `Content-Range: bytes */<size>` and an empty body → not a `308`.
+  The endpoint has no resumable variant, which is what the upload resume probe exists to
+  find out and what it caches. `OPTIONS /upload` → `204`, which is what the reachability
+  probe uses: small, unauthenticated, and it proves the route without touching any data.
 
 About 25 hours after that login the app landed on the login screen on its own — the 24 h
 token had expired and the session check caught it.
@@ -189,6 +207,12 @@ If a file with the same name is already there, the app adds a suffix: `report (1
 `report (2).csv`, and so on. Characters that are illegal on either file system are
 replaced before the name is used.
 
+Uploads have a working folder of their own. The file picker returns a copy it made in the
+app's cache directory, which the OS may purge at any time, so that copy is moved into
+`<app support>/upload_sources/` before the task starts and deleted once the upload
+finishes. A file the operator picked from their own storage is never moved — only the
+picker's copy of it is.
+
 The move is idempotent. A completed download is marked `pendingFinalize` before the move
 runs, and that flag survives a restart. On every launch and resume the app looks for any
 `pendingFinalize` row and tries the move again. If the source file is gone it checks shared
@@ -196,17 +220,74 @@ storage first; only if the file can't be found anywhere does the row get marked 
 
 ## Pause and resume
 
-Download pause is real: the partial file is kept on disk and the resume sends an HTTP
-`Range: bytes=X-` request. That holds across app restarts too — the plugin stores the
-offset and picks up from there. If the server rejects the range or the partial file is gone,
-the download restarts from zero and the app says so: "Couldn't resume. Restarting from the
-beginning."
+This is the part that matters most for a 500 MB catalog over shop Wi-Fi, so it is worth
+being precise about what survives an interruption and what doesn't.
 
-Upload pause is not real, because the API accepts a single multipart `POST` with no chunked
-or resumable variant. Pausing cancels the in-flight request and keeps the row with the
-local file path; resuming sends the whole file again. The UI says "Upload restarts from the
-beginning" under a paused upload rather than pretending otherwise. With a resumable endpoint
-— `tus`, S3 multipart — this becomes a real pause.
+**Downloads continue from the byte they stopped at.** The partial file stays on disk and
+the resume sends `Range: bytes=X-`. That holds across app restarts: the plugin keeps the
+offset, and the app re-reads the token before resuming, because a download can sit paused
+for longer than a 24-hour token lives — resuming with the header the task was created with
+collects a 401 that looks like a resume failure and isn't one. If the server refuses the
+range or the partial file is gone, the download starts over and says so.
+
+**Uploads continue from their offset when the endpoint can take one, and say so plainly
+when it can't.** Asking a server how much of an interrupted upload it still holds is the
+same question in every resumable protocol: send the upload's identity with
+`Content-Range: bytes */<total>` and an empty body, and a server that supports resuming
+answers `308` with a `Range: bytes=0-<last>` header. `UploadResumeProbe` asks exactly that.
+On a yes, the resume sends only the bytes after the offset as a raw body with
+`Content-Range` set, and the progress bar carries on from where it was instead of snapping
+back to zero. On a no, the upload restarts and the operator is told why — "This server
+can't continue an interrupted upload, so it starts again from the beginning."
+
+The endpoint this ships against answers no: `POST /upload` is a single multipart form with
+no resumable variant, and there is no second endpoint to negotiate with. So in practice,
+today, a paused upload does restart. What changed is that the app now *knows* that rather
+than assuming it, it says so before the operator commits to waiting, and pointing
+`Endpoints.baseUrl` at something that speaks the convention — tus, S3 multipart, Google's
+resumable protocol — turns real upload resume on with no other change. The verdict is
+cached per server, so an endpoint that has already said no is never asked again, and
+uploads smaller than 8 MB skip the question entirely because re-sending them costs less
+than the round trip.
+
+A paused transfer always states what resuming will cost, while it is still paused and the
+decision is still open: *"Continues from 412.6 MB when resumed"* or *"Starts again from the
+beginning when resumed"*. That sentence is the whole point — an operator deciding whether
+to wait for the shop Wi-Fi or carry the terminal to the back office needs to know whether
+the 412 MB already sent survives the wait.
+
+One more case the probe made visible: if the last bytes land and the connection dies before
+the response arrives, the server holds the whole file. Resending it would leave a duplicate.
+When the offset comes back equal to the file size the app marks the upload complete and
+resolves the stored name from the file list instead.
+
+## Losing the connection
+
+Letting a native task spend its three retries against a dead network and then fail is the
+wrong behaviour: it throws away a partial download and tells the operator nothing useful.
+So the repository watches connectivity itself. When the route to the server goes away,
+every running transfer is parked:
+
+- A running download pauses in place — partial file and offset intact.
+- Everything else (an upload, a queued task, a download whose server refuses ranges) has
+  its native task stopped, and the row keeps its byte count.
+
+Either way the row records *why* it stopped, and that reason is on screen: the status chip
+reads **Waiting for internet** rather than **Paused**, the detail line reads *"No internet.
+Continues from 412.6 MB as soon as the connection is back"*, and a snackbar says the
+connection was lost. When the connection returns the app starts them again by itself,
+oldest first, and says where each one picked up from.
+
+A transfer the operator paused by hand is left alone. That was a decision, not an accident,
+and the app does not overrule it.
+
+Two guards sit around that loop. Parking and resuming run on one queue, so a connection
+that drops and comes back while the parking is half done can't leave transfers parked with
+nothing coming to start them. And a transfer that has to re-send the whole file is
+restarted automatically at most three times — a flapping shop connection would otherwise
+push the same 400 MB up the line all afternoon. Past that the row stays parked and waits
+for a person. Transfers that keep their place aren't capped, because resuming them costs
+nothing.
 
 ## Working offline
 
@@ -216,10 +297,20 @@ operator always knows whether what they're looking at is live. A failed refresh 
 list on screen and marks it stale rather than blanking the page.
 
 Starting a transfer with no connection still enqueues it; the OS holds it until there's a
-network. When the connection comes back the app retries whatever died on the network, once
-per outage, and refreshes the list. That retry is capped at one attempt per outage — a
-flapping connection can't create a retry loop because a transfer is only eligible again once
-it's actually run. A snackbar says which transfer resumed.
+network. Transfers that were already running are parked and started again, as described
+above. Transfers that failed on the network before the app could park them are retried
+once per outage — a transfer only becomes eligible again once it has actually run, so a
+flapping connection can't create a retry loop. A snackbar says which transfer resumed.
+
+"Online" here means *the server can be reached*, not *an interface is up*. `connectivity_plus`
+only reports the second, and a terminal joined to a cafe hotspot behind a captive portal,
+or to a shop router whose uplink is down, reports Wi-Fi and is unreachable. Acting on that
+alone made the app announce "back online" and burn its one automatic retry against a dead
+route. Every connectivity verdict now goes through a cheap `OPTIONS` probe against the
+server — any HTTP answer, including 401 or 405, proves the route works; only a transport
+failure counts as offline. And because a captive portal being signed in produces no further
+platform event, a link that's up with nothing behind it is re-probed every 15 seconds until
+it comes back.
 
 Logging out cancels running transfers and clears the local history and file cache so the
 next account starts clean. A session *expiry* clears neither, because it's the same user
@@ -255,9 +346,90 @@ widgets instead of raw `Text`, every string in `AppStrings`. No localization —
 asked for English only — but having the strings centralized means adding it later is
 mechanical.
 
+## What broke when I thought about a real counter
+
+Most of these only appear once you stop testing on a desk with good Wi-Fi. They're listed
+because each one changed the code, and because the reasoning is the interesting part.
+
+**A dropped connection destroyed a partial download.** The native task spent its three
+retries against a dead network, failed, and the bytes went with it. An operator who was
+380 MB into a catalog got a Retry button and nothing else. Parking the transfer the moment
+the route disappears keeps the file and the offset, and costs nothing when the connection
+comes straight back.
+
+**Resuming replayed a token that had already expired.** A download can sit paused
+overnight, and the resume re-sent the `Authorization` header the task was created with. The
+401 that came back was reported as a failed resume, which is not what happened and sends
+you looking in the wrong place. The session is re-read and the header replaced at resume
+time now.
+
+**"Online" didn't mean the server was reachable.** `connectivity_plus` reports interfaces.
+A captive portal or a router with a dead uplink both look like healthy Wi-Fi, so the app
+announced "back online" and spent its one automatic retry on a route that was never going
+to work. Every verdict now goes through a cheap `OPTIONS` probe, and a link with nothing
+behind it is re-probed until something answers.
+
+**Pause refused to work and blamed the user.** Pausing a transfer that hadn't started yet,
+or a download whose server won't do ranges, failed with "This action isn't available right
+now." That explains nothing and leaves cancelling as the only way to stop something.
+Pausing always works now; what differs is whether the bytes are kept, and the row says
+which it is.
+
+**A flapping connection would have re-sent the same file all afternoon.** Park, resume,
+park, resume — and because an upload to this server starts over each time, every cycle
+costs the full file again on a metered link. Automatic restarts are capped at three per
+transfer; after that it waits for a person. Transfers that keep their place aren't capped,
+because resuming them is free.
+
+**A connection that dropped and returned mid-park stranded transfers.** The two handlers
+ran independently, so "resume everything parked" could run while the parking was still in
+flight and find nothing to do, leaving rows paused with nothing coming for them. They share
+one queue now.
+
+**Parking cancelled the native task, and the cancellation came back as an event** that
+would have turned a paused row into a cancelled one. Our own cancellations are now
+recognised and ignored.
+
+**Progress on a resumed upload would have been measured against the wrong number.** The
+native task only sends the bytes after the offset, so both the size and the fraction it
+reports describe that remainder. Taken at face value, resuming at 80% would have shown 0%
+and climbed to 100% over the last fifth of the file. The values are rebased onto the whole
+file, which is also why the bar doesn't jump when a resume starts.
+
+**An upload could have been sent twice.** If the last bytes land and the connection dies
+before the response arrives, the server has the file and the app doesn't know it. Asking
+for the offset answers that too — when it comes back equal to the file size the upload is
+marked complete instead of being re-sent.
+
+**A big upload could lose the file it was reading from.** The file picker doesn't hand
+back the file you chose — it hands back a copy it wrote into the app's *cache* directory,
+and Android is free to purge that whenever storage runs short. That's fine for a 2 MB CSV
+that uploads in a second. It is not fine for a 500 MB video: the upload can be parked
+overnight waiting for Wi-Fi, or sitting failed until someone comes in and taps Retry, and
+the source can quietly evaporate in between. The resume then reports "Upload source is
+gone", which is true and useless — nothing the operator did caused it and nothing they can
+do fixes it.
+
+Downloads already avoid this (`Config.useCacheDir` is `never`, for the same reason), so
+uploads now do too: the picked copy is moved into `<app support>/upload_sources/` before
+the task is enqueued. Both directories are inside the app's own container, so it's a
+rename — instant, and it does not need a second 500 MB of free space. Files outside the
+sandbox are a path the operator owns and are never moved or deleted. Names are stamped so
+two uploads of `catalog.csv` can't land on each other, the copy is deleted when the upload
+finishes, and a resync prunes anything no transfer refers to any more — otherwise a crash
+between the move and the database write would strand half a gigabyte for good.
+
+**The schema gained columns with no way to upgrade into them.** There was no `onUpgrade`,
+so bumping the version would have thrown on every install that already had history in it —
+on terminals already in shops. Migrations run step by step now, so a device that skipped a
+release still lands on the right schema.
+
+**Golden-test diff output was committed.** `test/golden/failures/` is written on every
+failed comparison and had been checked in. Deleted and ignored.
+
 ## Tests
 
-`flutter test` runs 243 tests and needs no device.
+`flutter test` runs 285 tests and needs no device.
 
 Unit tests cover the parsers (every documented response shape plus malformed input — the
 mock API is loosely specified so the parsers are deliberately tolerant), upload validation,
@@ -270,9 +442,31 @@ cache replacement inside a transaction, survival across a reopen. Repository tes
 level up and check the offline-first behaviour end to end — a refresh caches the result, a
 failure falls back to the cache, delete and logout leave the cache honest.
 
+The pause-and-resume behaviour has its own set, because it is the part with the most ways
+to be subtly wrong: losing the route parks a running download in place and records why;
+regaining it resumes with a freshly read token; a transfer the operator paused is left
+alone when the connection returns; a download that can't pause in place is parked by
+cancelling it instead; an upload the server can't continue starts over and says so; one it
+can continue keeps its progress; one the server already holds in full is completed rather
+than re-sent; and a connection flapping five times restarts the same upload three times,
+not five. A second set covers the upload's working file against real directories (with
+`path_provider` standing in for the platform ones): a picked copy is moved out of the
+cache rather than copied, a file the operator owns is left exactly where it is and is
+never deleted, two uploads of the same name don't collide, and a prune drops the orphans
+while keeping what a parked transfer is still waiting on.
+
+`UploadResumeProbe` is covered separately against a mocked client — `308` with a
+`Range` header, a bare tus-style offset, a `200` meaning the file is already there, an
+offset past the end of the file, an unreachable server, and the caching that means an
+endpoint which has said no is never asked twice. `ConnectivityServiceImpl` is tested for
+the case that caused the trouble: an interface that is up with nothing reachable behind it.
+`TransferModel` covers the progress rebasing, so a resumed upload can't report its own
+remainder as the whole file.
+
 Every bloc has `bloc_test` coverage with mocked repositories and real use cases:
 `AuthBloc` (session restore, login, logout, the expiry timer), `TransferBloc` (history,
-live updates, ordering, derived counters, auto-retry), `UploadBloc`, `FilesBloc`.
+live updates, ordering, derived counters, auto-retry, and what the operator is told when a
+transfer is parked by the network and when it picks up again), `UploadBloc`, `FilesBloc`.
 
 Above those, `app_flow_test.dart` drives the real app with mocked repositories through the
 flows that matter: offline fallback, recovery on reconnect, the permission prompt, an
@@ -298,17 +492,48 @@ Start an upload and switch to another tab — the mini banner should show progre
 badge should read 1. Minimise the app and check the system notification on Android; it
 should keep updating. Reopen and confirm the progress still matches.
 
-Enable airplane mode while a transfer is running. The status should change to "Waiting for
-network, retrying..." and after three failed attempts the row should fail with a Retry
-button. Disable airplane mode and it should pick up automatically.
+Enable airplane mode while a transfer is running. Within a few seconds the row should go
+to **Waiting for internet** rather than failing, a snackbar should say the connection was
+lost, and the detail line should say what resuming will cost. Disable airplane mode and the
+transfer should start again on its own; a download should name the position it continued
+from. Try it on a download at around 80% and confirm the progress bar does not go back to
+zero.
+
+For the captive-portal case, join a Wi-Fi network with no working uplink (an emulator with
+`-netdelay none -netspeed none` plus a blocked host, or a hotspot with mobile data off).
+The app should say there is no connection to the server even though Wi-Fi shows as
+connected, and recover within about 15 seconds of the route coming back.
 
 Swipe the app away (not force stop), wait a moment, then reopen. The history should be
 intact, any completed downloads should be in `Downloads/POS Software`, and running tasks
 should still be running.
 
 Pause and resume a download, and then pause it again, restart the app and resume — the
-partial file should be kept and the resume should continue from where it left off. Pause
-and resume an upload and confirm it shows the restart note and starts from 0%.
+partial file should be kept and the resume should continue from where it left off, with the
+paused row stating the position beforehand. Pause an upload and confirm the row says it
+will start again from the beginning *before* you resume it, then resume and confirm the
+snackbar explains that this server can't continue an interrupted upload.
+
+To see the resumable-upload path actually run you need an endpoint that answers the offset
+request. Point `Endpoints.baseUrl` at a tus server (`tusd -behind-proxy`) or anything else
+that replies `308` with a `Range` header, pause a large upload past 8 MB, and resume: the
+progress bar should carry on from where it stopped instead of resetting.
+
+Install the previous build, start a couple of transfers, then install this one over it. The
+history should still be there — the database migrates rather than being recreated.
+
+For the upload working file: start a 500 MB upload, pause it, then clear the app's cache
+from Android settings (Storage → Clear cache, *not* Clear data). Resume — it should still
+run, because the source was moved out of the cache before the task started.
+
+Worth knowing about disk space at this size. A 500 MB upload needs 500 MB free for the
+picker's copy, and "Preparing file..." is a real copy taking a few seconds with no progress
+bar. A 500 MB download needs 500 MB plus 50 MB headroom to start — the plugin checks that
+up front and fails immediately with "Not enough storage space" rather than wasting the
+bandwidth — and then briefly needs another 500 MB when the finished file is copied into
+`Downloads/POS Software` through MediaStore. If that last copy can't fit, the download
+stays in private storage and is still openable from inside the app; it just won't appear in
+the Files app.
 
 Tap a completion notification from the foreground, the background and from a killed app.
 A completed upload should open the Files tab; everything else should open Transfers with
@@ -326,8 +551,10 @@ For network throttling on the emulator: Extended controls → Cellular → Netwo
 
 ## What isn't finished
 
-**Pausing an upload restarts it from zero** — covered above, but worth calling out again
-because it's the most visible limitation. It's a constraint of the API, not the app.
+**Uploads to this server still restart from zero when interrupted.** The negotiation, the
+offset plumbing and the honest messaging are all in place and tested; what's missing is a
+server that answers the question. It's a constraint of the API, not the app, and it stops
+being one the day the endpoint speaks any of the standard resumable protocols.
 
 **It's HTTP, not HTTPS.** Cleartext is enabled on both platforms only because the provided
 server is plain HTTP. Production needs TLS and both exemptions gone.
@@ -348,7 +575,13 @@ background `URLSession`, SPM, `UIFileSharingEnabled` — but it was never built,
 there's no Xcode on the machine I worked on. I'd want a device run before claiming it
 works.
 
-With more time I'd add a resumable upload protocol, an upload queue that batches catalog
-imports instead of firing them one at a time, checksum verification after download,
+One rough edge I know about: when the OS parks a download for us, Android's notification
+reads "Download paused" whether the operator paused it or the connection did. The in-app
+row distinguishes the two; the notification can't, because its copy is configured per group
+rather than per task. Worth fixing with per-task notification config if it ever confuses
+anyone.
+
+With more time I'd add an upload queue that batches catalog imports instead of firing them
+one at a time, checksum verification after download,
 per-transfer settings (Wi-Fi only, priority), a proper migration suite as the schema grows,
 and the layout tests wired into CI.

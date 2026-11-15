@@ -102,17 +102,36 @@ class _LoginFormState extends State<LoginForm> {
                 onFieldSubmitted: (_) => _submit(),
               ),
               SizedBox(height: context.spacing.xl),
-              FilledButton(
-                onPressed: isSubmitting ? null : _submit,
-                child: isSubmitting
-                    ? SizedBox.square(
-                        dimension: context.sizes.iconMd,
-                        child: const CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : LabelText(
-                        AppStrings.loginButton,
-                        color: context.color.onPrimary,
-                      ),
+              SizedBox(
+                height: 52,
+                child: FilledButton(
+                  onPressed: isSubmitting ? null : _submit,
+                  child: isSubmitting
+                      ? SizedBox.square(
+                          dimension: context.sizes.iconMd,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: context.color.onPrimary,
+                          ),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            LabelText(
+                              AppStrings.loginButton,
+                              color: context.color.onPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            SizedBox(width: context.spacing.sm),
+                            Icon(
+                              Icons.arrow_forward_rounded,
+                              size: context.sizes.iconSm,
+                              color: context.color.onPrimary,
+                            ),
+                          ],
+                        ),
+                ),
               ),
             ],
           ),

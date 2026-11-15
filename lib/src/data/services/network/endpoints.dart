@@ -10,6 +10,10 @@ abstract final class Endpoints {
 
   static const String fileQuery = 'file';
 
+  /// Identifies an interrupted upload across attempts, so a server that can
+  /// resume knows which partial file the offset request is about.
+  static const String uploadIdHeader = 'X-Upload-Id';
+
   static String get uploadUrl => '$baseUrl$upload';
 
   /// Builds the download URL with a properly encoded `file` query parameter.

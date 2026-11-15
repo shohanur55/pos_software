@@ -81,15 +81,27 @@ class BackgroundTransferService {
 
   Future<void> resumeFromBackground() => _downloader.resumeFromBackground();
 
+  /// Starts an upload, optionally continuing one the server already holds
+  /// part of.
+  ///
+  /// A fresh upload is the documented multipart `POST`. A resumed one sends
+  /// only the bytes from [resumeFromByte] onward as a raw body, with the
+  /// offset stated in `Range` (which the plugin reads to seek the file) and in
+  /// `Content-Range` (which the server reads to place them). The caller only
+  /// passes an offset after [UploadResumeProbe] confirmed the server can take
+  /// one, so this never guesses.
   Future<void> enqueueUpload({
     required String taskId,
     required String filePath,
     required String authorization,
     required TransferTaskMeta meta,
+    int resumeFromByte = 0,
   }) async {
     final (baseDirectory, directory, filename) = await Task.split(
       filePath: filePath,
     );
+    final resuming = resumeFromByte > 0;
+    final totalBytes = resuming ? await File(filePath).length() : 0;
     final task = UploadTask(
       taskId: taskId,
       url: Endpoints.uploadUrl,
@@ -97,7 +109,16 @@ class BackgroundTransferService {
       baseDirectory: baseDirectory,
       directory: directory,
       fileField: TransferConstants.uploadFileField,
-      headers: {'Authorization': authorization},
+      post: resuming ? 'binary' : null,
+      headers: {
+        'Authorization': authorization,
+        if (resuming) ...{
+          'Range': 'bytes=$resumeFromByte-${totalBytes - 1}',
+          'Content-Range':
+              'bytes $resumeFromByte-${totalBytes - 1}/$totalBytes',
+          Endpoints.uploadIdHeader: meta.transferId,
+        },
+      },
       group: TransferConstants.uploadGroup,
       updates: Updates.statusAndProgress,
       retries: TransferConstants.retries,
@@ -136,10 +157,24 @@ class BackgroundTransferService {
     return task is DownloadTask && await _downloader.pause(task);
   }
 
-  /// Returns `false` when the plugin cannot resume, e.g. the partial file is gone.
-  Future<bool> resumeDownload(String taskId) async {
+  /// Continues a paused download from the byte it stopped at.
+  ///
+  /// [authorization] replaces the header the task was created with. A download
+  /// can sit paused for longer than a token lives — overnight, or across a
+  /// re-login — and the plugin would otherwise replay the stale header and
+  /// collect a 401 that looks like a resume failure.
+  ///
+  /// Returns `false` when the plugin cannot resume, e.g. the partial file is
+  /// gone or the server stopped accepting ranges.
+  Future<bool> resumeDownload(String taskId, {String? authorization}) async {
     final task = await _taskFor(taskId);
-    return task is DownloadTask && await _downloader.resume(task);
+    if (task is! DownloadTask) return false;
+    final refreshed = authorization == null
+        ? task
+        : task.copyWith(
+            headers: {...task.headers, 'Authorization': authorization},
+          );
+    return _downloader.resume(refreshed);
   }
 
   /// Whether the server accepted range requests for a running download.
@@ -250,16 +285,81 @@ class BackgroundTransferService {
     return opened ? OpenFileOutcome.opened : OpenFileOutcome.noApp;
   }
 
-  /// Deletes the sandbox copy the file picker made for an upload. Files
-  /// outside the app's temporary storage are never touched.
-  Future<void> deletePickedCopy(String path) async {
-    final temporary = await Task.baseDirectoryPath(BaseDirectory.temporary);
-    final isTemporary =
-        p.isWithin(temporary, path) ||
-        p.isWithin(Directory.systemTemp.path, path);
-    final file = File(path);
-    if (isTemporary && await file.exists()) await file.delete();
+  /// Moves the picker's copy of an upload out of the cache directory and
+  /// returns where it ended up.
+  ///
+  /// The file picker hands back a copy it wrote into the app's cache. Android
+  /// is free to purge that directory whenever storage runs short, and an
+  /// upload can be waiting a long time — parked overnight for Wi-Fi, or sitting
+  /// failed until someone retries it. Losing a 500 MB source file in the
+  /// meantime turns a resumable situation into "Upload source is gone".
+  ///
+  /// Both directories live inside the app's own container, so this is a
+  /// rename: instant, and it needs no second copy of the file. The fallbacks
+  /// exist only for the case where that assumption is wrong somewhere.
+  ///
+  /// A path outside the app's sandbox belongs to the user and is returned
+  /// untouched.
+  Future<String> retainUploadSource(String pickedPath) async {
+    final source = File(pickedPath);
+    if (!await _isAppOwnedCopy(pickedPath) || !await source.exists()) {
+      return pickedPath;
+    }
+    final directory = Directory(await _uploadSourceDirectory());
+    if (p.equals(p.dirname(pickedPath), directory.path)) return pickedPath;
+    await directory.create(recursive: true);
+    // Two uploads of the same file name must not land on each other.
+    final stamp = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+    final target = p.join(directory.path, '${stamp}_${p.basename(pickedPath)}');
+    try {
+      await source.rename(target);
+      return target;
+    } on FileSystemException {
+      try {
+        await source.copy(target);
+        await source.delete();
+        return target;
+      } on FileSystemException catch (error) {
+        // A cache copy that might vanish still beats refusing the upload.
+        logger.w('Could not retain upload source: ${error.message}');
+        return pickedPath;
+      }
+    }
   }
+
+  /// Deletes files left in the upload folder that no transfer refers to any
+  /// more, e.g. because the app died between the move and the row being
+  /// written. Without this a crash would strand the file forever.
+  Future<void> pruneUploadSources(Iterable<String> inUse) async {
+    final directory = Directory(await _uploadSourceDirectory());
+    if (!await directory.exists()) return;
+    final keep = inUse.toSet();
+    await for (final entity in directory.list()) {
+      if (entity is File && !keep.contains(entity.path)) {
+        await entity.delete();
+      }
+    }
+  }
+
+  /// Deletes the copy made for an upload. Files outside the app's own storage
+  /// are never touched.
+  Future<void> deletePickedCopy(String path) async {
+    if (!await _isAppOwnedCopy(path)) return;
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<bool> _isAppOwnedCopy(String path) async {
+    final temporary = await Task.baseDirectoryPath(BaseDirectory.temporary);
+    return p.isWithin(temporary, path) ||
+        p.isWithin(Directory.systemTemp.path, path) ||
+        p.isWithin(await _uploadSourceDirectory(), path);
+  }
+
+  Future<String> _uploadSourceDirectory() async => p.join(
+    await Task.baseDirectoryPath(BaseDirectory.applicationSupport),
+    AppConstants.uploadSourceFolderName,
+  );
 
   Future<String?> _openTarget(String fileName, String? savedPath) async {
     if (Platform.isIOS) {

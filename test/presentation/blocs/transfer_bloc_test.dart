@@ -7,6 +7,7 @@ import 'package:pos_software/src/core/base/failure.dart';
 import 'package:pos_software/src/core/base/result.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_error_kind.dart';
+import 'package:pos_software/src/domain/entities/transfer_pause_reason.dart';
 import 'package:pos_software/src/domain/entities/transfer_status.dart';
 import 'package:pos_software/src/domain/entities/transfer_type.dart';
 import 'package:pos_software/src/domain/usecases/transfers/cancel_transfer_use_case.dart';
@@ -373,4 +374,81 @@ void main() {
     ],
     verify: (bloc) => expect(bloc.state.unseenFailedCount, 0),
   );
+
+  group('what the operator is told about the network', () {
+    final running = transfer(
+      id: 'big',
+      type: TransferType.download,
+      status: TransferStatus.running,
+      fileName: 'catalog_full.csv',
+      totalBytes: 1000,
+      progress: 0.8,
+      canPauseNatively: true,
+    );
+    final parked = transfer(
+      id: 'big',
+      type: TransferType.download,
+      status: TransferStatus.paused,
+      fileName: 'catalog_full.csv',
+      totalBytes: 1000,
+      progress: 0.8,
+      canPauseNatively: true,
+      pauseReason: TransferPauseReason.noNetwork,
+    );
+
+    blocTest<TransferBloc, TransferState>(
+      'a transfer parked by a dropped connection says so',
+      build: build,
+      act: (bloc) async {
+        bloc.add(const TransfersStarted());
+        await Future<void>.delayed(Duration.zero);
+        updates
+          ..add(running)
+          ..add(parked);
+      },
+      wait: const Duration(milliseconds: 10),
+      verify: (bloc) {
+        expect(bloc.state.notice?.kind, TransferNoticeKind.pausedByNetwork);
+        expect(bloc.state.notice?.subject, 'catalog_full.csv');
+      },
+    );
+
+    blocTest<TransferBloc, TransferState>(
+      'coming back online names the position the transfer picks up from',
+      build: build,
+      act: (bloc) async {
+        bloc.add(const TransfersStarted());
+        await Future<void>.delayed(Duration.zero);
+        updates
+          ..add(parked)
+          ..add(running);
+      },
+      wait: const Duration(milliseconds: 10),
+      verify: (bloc) {
+        expect(bloc.state.notice?.kind, TransferNoticeKind.resumedFromOffset);
+        expect(bloc.state.notice?.detail, '800 B');
+      },
+    );
+
+    blocTest<TransferBloc, TransferState>(
+      'an upload that has to start over is not promised a position',
+      build: build,
+      act: (bloc) async {
+        bloc.add(const TransfersStarted());
+        await Future<void>.delayed(Duration.zero);
+        final pausedUpload = transfer(
+          id: 'up',
+          status: TransferStatus.paused,
+          pauseReason: TransferPauseReason.noNetwork,
+        );
+        updates
+          ..add(pausedUpload)
+          ..add(transfer(id: 'up', status: TransferStatus.queued));
+      },
+      wait: const Duration(milliseconds: 10),
+      verify: (bloc) {
+        expect(bloc.state.notice?.kind, TransferNoticeKind.autoResumed);
+      },
+    );
+  });
 }

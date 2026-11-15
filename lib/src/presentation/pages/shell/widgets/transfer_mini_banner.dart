@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../blocs/transfer/transfer_bloc.dart';
+import '../../../theme/app_theme.dart';
 import '../../../theme/theme_extensions.dart';
 import '../../../widgets/common/info_banner.dart';
 import '../../../widgets/typography/app_text.dart';
@@ -60,6 +61,8 @@ class TransferMiniBanner extends StatelessWidget {
   }
 }
 
+/// Brand-green gradient strip with a progress line on top and a one-line
+/// summary underneath. Reads as "work is happening" without shouting.
 class _ActiveBanner extends StatelessWidget {
   const _ActiveBanner({
     required this.label,
@@ -73,9 +76,8 @@ class _ActiveBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.color;
     return Material(
-      color: colors.primaryContainer,
+      color: AppTheme.brandPrimary,
       child: InkWell(
         onTap: onTap,
         child: Column(
@@ -84,28 +86,25 @@ class _ActiveBanner extends StatelessWidget {
             LinearProgressIndicator(
               value: progress,
               minHeight: context.sizes.thinProgressBar,
+              backgroundColor: Colors.white.withValues(alpha: 0.22),
+              valueColor: const AlwaysStoppedAnimation(Colors.white),
               borderRadius: BorderRadius.zero,
             ),
             Padding(
               padding: context.padding.banner,
               child: Row(
                 children: [
-                  Icon(
-                    Icons.swap_vert_rounded,
-                    color: colors.onPrimaryContainer,
-                  ),
+                  const Icon(Icons.swap_vert_rounded, color: Colors.white),
                   SizedBox(width: context.spacing.md),
                   Expanded(
                     child: BodyMediumText(
                       label,
-                      color: colors.onPrimaryContainer,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
                       maxLines: 2,
                     ),
                   ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    color: colors.onPrimaryContainer,
-                  ),
+                  const Icon(Icons.chevron_right_rounded, color: Colors.white),
                 ],
               ),
             ),

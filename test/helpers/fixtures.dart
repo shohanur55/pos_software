@@ -3,6 +3,7 @@ import 'package:pos_software/src/domain/entities/picked_file_entity.dart';
 import 'package:pos_software/src/domain/entities/remote_file_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
 import 'package:pos_software/src/domain/entities/transfer_error_kind.dart';
+import 'package:pos_software/src/domain/entities/transfer_pause_reason.dart';
 import 'package:pos_software/src/domain/entities/transfer_status.dart';
 import 'package:pos_software/src/domain/entities/transfer_type.dart';
 
@@ -42,6 +43,9 @@ TransferEntity transfer({
   int? totalBytes = 1000,
   double? speedBytesPerSecond,
   Duration? timeRemaining,
+  TransferPauseReason? pauseReason,
+  int resumeFromByte = 0,
+  bool canPauseNatively = false,
 }) {
   final created = createdAt ?? fixedNow;
   return TransferEntity(
@@ -59,5 +63,8 @@ TransferEntity transfer({
     createdAt: created,
     updatedAt: created,
     errorKind: errorKind,
+    pauseReason: pauseReason,
+    resumeFromByte: resumeFromByte,
+    canPauseNatively: canPauseNatively,
   );
 }

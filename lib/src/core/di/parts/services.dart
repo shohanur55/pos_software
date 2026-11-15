@@ -10,12 +10,18 @@ void _registerServices() {
     ..registerLazySingleton<BackgroundTransferService>(
       BackgroundTransferService.new,
     )
+    ..registerLazySingleton<UploadResumeProbe>(
+      () => UploadResumeProbe(sl(), sl()),
+    )
+    ..registerLazySingleton<ServerReachability>(ServerReachability.new)
     ..registerLazySingleton<AppDatabase>(AppDatabase.new)
     ..registerLazySingleton<TransferDao>(() => TransferDao(sl()))
     ..registerLazySingleton<RemoteFileDao>(() => RemoteFileDao(sl()))
     ..registerLazySingleton<SystemSettingsService>(SystemSettingsService.new)
     ..registerLazySingleton<FilePickerService>(FilePickerServiceImpl.new)
     ..registerLazySingleton<FileInspector>(FileInspectorImpl.new)
-    ..registerLazySingleton<ConnectivityService>(ConnectivityServiceImpl.new)
+    ..registerLazySingleton<ConnectivityService>(
+      () => ConnectivityServiceImpl(reachability: sl()),
+    )
     ..registerLazySingleton<ExternalLinkService>(ExternalLinkServiceImpl.new);
 }

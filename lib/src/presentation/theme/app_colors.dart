@@ -74,11 +74,11 @@ class AppColors extends ThemeExtension<AppColors> {
           ? const Color(0x1FFFFFFF)
           : const Color(0x80FFFFFF),
       accentDocument: isDark
-          ? const Color(0xFF7DDB9A)
-          : const Color(0xFF1B7F3B),
+          ? const Color(0xFFFFCE6B)
+          : const Color(0xFFB36A00),
       accentDocumentContainer: isDark
-          ? const Color(0xFF14522A)
-          : const Color(0xFFD9F2E1),
+          ? const Color(0xFF523300)
+          : const Color(0xFFFFEFD1),
       accentImage: isDark ? const Color(0xFF8FB8FF) : const Color(0xFF1F5FBF),
       accentImageContainer: isDark
           ? const Color(0xFF1B3155)

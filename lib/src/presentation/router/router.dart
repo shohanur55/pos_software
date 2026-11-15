@@ -10,6 +10,7 @@ import '../blocs/upload/upload_bloc.dart';
 import '../pages/files/files_page.dart';
 import '../pages/login/login_page.dart';
 import '../pages/shell/main_shell_page.dart';
+import '../pages/signup/signup_webview_page.dart';
 import '../pages/splash/splash_page.dart';
 import '../pages/transfers/transfers_page.dart';
 import '../pages/upload/upload_page.dart';
@@ -47,7 +48,8 @@ class AppRouter {
       case AuthStatus.unknown:
         return location == Routes.splash ? null : Routes.splash;
       case AuthStatus.unauthenticated:
-        return location == Routes.login ? null : Routes.login;
+        if (location == Routes.login || location == Routes.signup) return null;
+        return Routes.login;
       case AuthStatus.authenticated:
         if (location != Routes.splash && location != Routes.login) return null;
         final pending = pendingLocation;

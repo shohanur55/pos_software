@@ -66,6 +66,21 @@ class ShellListeners extends StatelessWidget {
           actionLabel: AppStrings.view,
           onAction: openTransfers,
         );
+      case TransferNoticeKind.pausedByNetwork:
+        context.showAppSnackBar(
+          AppStrings.pausedByNetworkSnack(notice.subject ?? ''),
+          tone: SnackBarTone.warning,
+          actionLabel: AppStrings.view,
+          onAction: openTransfers,
+        );
+      case TransferNoticeKind.resumedFromOffset:
+        context.showAppSnackBar(
+          AppStrings.resumedFromSnack(
+            notice.subject ?? '',
+            notice.detail ?? '',
+          ),
+          tone: SnackBarTone.success,
+        );
       case TransferNoticeKind.autoResumed:
         context.showAppSnackBar(
           AppStrings.autoResumedSnack(notice.subject ?? ''),
@@ -86,6 +101,11 @@ class ShellListeners extends StatelessWidget {
       case TransferNoticeKind.resumeRestarting:
         context.showAppSnackBar(
           AppStrings.errorResumeFailed,
+          tone: SnackBarTone.warning,
+        );
+      case TransferNoticeKind.resumeNotSupported:
+        context.showAppSnackBar(
+          AppStrings.errorResumeNotSupported,
           tone: SnackBarTone.warning,
         );
       case TransferNoticeKind.unauthorized:

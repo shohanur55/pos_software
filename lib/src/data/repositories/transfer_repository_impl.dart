@@ -12,10 +12,12 @@ import '../../domain/entities/remote_file_entity.dart';
 import '../../domain/entities/transfer_entity.dart';
 import '../../domain/entities/transfer_error_kind.dart';
 import '../../domain/entities/transfer_notification_tap_entity.dart';
+import '../../domain/entities/transfer_pause_reason.dart';
 import '../../domain/entities/transfer_status.dart';
 import '../../domain/entities/transfer_type.dart';
 import '../../domain/entities/upload_request_entity.dart';
 import '../../domain/repositories/transfer_repository.dart';
+import '../../domain/services/connectivity_service.dart';
 import '../models/remote_files_parser.dart';
 import '../models/transfer_events.dart';
 import '../models/transfer_model.dart';
@@ -28,6 +30,7 @@ import '../services/network/network_failure_mapper.dart';
 import '../services/network/rest_client.dart';
 import '../services/system/system_settings_service.dart';
 import '../services/transfer/background_transfer_service.dart';
+import '../services/transfer/upload_resume_probe.dart';
 import '../services/transfer/uploaded_name_resolver.dart';
 
 class TransferRepositoryImpl extends TransferRepository {
@@ -37,7 +40,9 @@ class TransferRepositoryImpl extends TransferRepository {
     this._sessionStorage,
     this._client,
     this._settings,
-    this._cache, {
+    this._cache,
+    this._connectivity,
+    this._resumeProbe, {
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -47,6 +52,8 @@ class TransferRepositoryImpl extends TransferRepository {
   final RestClient _client;
   final SystemSettingsService _settings;
   final CacheService _cache;
+  final ConnectivityService _connectivity;
+  final UploadResumeProbe _resumeProbe;
   final DateTime Function() _clock;
   final Random _random = Random();
 
@@ -62,6 +69,20 @@ class TransferRepositoryImpl extends TransferRepository {
 
   /// Shared by every caller, so a second one never sees a half-filled map.
   Future<void>? _loading;
+
+  StreamSubscription<bool>? _connectivitySubscription;
+
+  /// Keeps parking and resuming in the order the connection changed.
+  Future<void> _networkQueue = Future.value();
+
+  /// How often the app has restarted each transfer by itself.
+  final Map<String, int> _autoRestarts = {};
+
+  /// A transfer that keeps its place costs nothing to start again, so only the
+  /// ones that have to re-send the whole file are capped. Without this a
+  /// flapping shop connection would push the same 400 MB up the line over and
+  /// over; past the cap the row stays parked and waits for a person.
+  static const int _autoRestartLimit = 3;
 
   /// A native task that vanished is only declared lost after this grace
   /// period, because a freshly enqueued task may not be recorded yet.
@@ -95,6 +116,9 @@ class TransferRepositoryImpl extends TransferRepository {
           'Upload source is missing',
         );
       }
+      // Taken out of the cache directory first: the OS may purge that while
+      // the upload is parked or waiting to be retried.
+      final source = await _service.retainUploadSource(request.filePath);
       final now = _clock();
       final id = _newId();
       final model = TransferModel(
@@ -105,13 +129,13 @@ class TransferRepositoryImpl extends TransferRepository {
         status: TransferStatus.queued,
         createdAt: now,
         updatedAt: now,
-        localPath: request.filePath,
+        localPath: source,
         url: Endpoints.uploadUrl,
         totalBytes: request.sizeBytes,
       );
       await _service.enqueueUpload(
         taskId: id,
-        filePath: request.filePath,
+        filePath: source,
         authorization: session.authorizationHeader,
         meta: _metaFor(model),
       );
@@ -181,27 +205,50 @@ class TransferRepositoryImpl extends TransferRepository {
           'Not pausable in this state',
         );
       }
-      if (model.isUpload) {
-        // A multipart POST cannot continue mid-stream: stop it and keep the row.
-        await _serialized(
-          () => _commit(
-            model.copyWith(
-              status: TransferStatus.paused,
-              clearTransient: true,
-              updatedAt: _clock(),
-            ),
-          ),
-        );
-        await _service.cancel(model.taskId);
+      await _park(id, TransferPauseReason.user);
+    });
+  }
+
+  /// Puts a transfer into [TransferStatus.paused] by whichever route keeps the
+  /// most work.
+  ///
+  /// A running download against a range-capable server pauses in place: the
+  /// partial file and its offset stay on disk and the resume continues from
+  /// there. Anything else — a queued task, an upload, a server that refuses
+  /// ranges — has to stop the native task, so the row keeps its byte count and
+  /// the UI can say up front what resuming will cost.
+  ///
+  /// Pausing always succeeds. Telling an operator "this action isn't
+  /// available" because the server dislikes range requests explains nothing
+  /// and leaves them with no way to stop a transfer short of canceling it.
+  Future<void> _park(String id, TransferPauseReason reason) async {
+    final model = _transfers[id];
+    if (model == null || !model.status.canPause) return;
+    final pausedInPlace =
+        model.isDownload &&
+        model.status == TransferStatus.running &&
+        (await asyncGuard(() => _service.pauseDownload(model.taskId)))
+                .dataOrNull ==
+            true;
+    await _serialized(() async {
+      final current = _transfers[id];
+      // The transfer may have finished or been replaced while the native
+      // pause was in flight.
+      if (current == null ||
+          current.taskId != model.taskId ||
+          !current.status.canPause) {
         return;
       }
-      if (!await _service.pauseDownload(model.taskId)) {
-        throw const Failure(
-          FailureKind.notAllowed,
-          'Server does not support pausing',
-        );
-      }
+      await _commit(
+        current.copyWith(
+          status: TransferStatus.paused,
+          pauseReason: reason,
+          clearTransient: true,
+          updatedAt: _clock(),
+        ),
+      );
     });
+    if (!pausedInPlace) await _service.cancel(model.taskId);
   }
 
   @override
@@ -214,19 +261,83 @@ class TransferRepositoryImpl extends TransferRepository {
           'Not resumable in this state',
         );
       }
-      if (model.isUpload) return _restart(model);
-      _requireSession();
-      if (await _service.resumeDownload(model.taskId)) {
+      return _resumeModel(model);
+    });
+  }
+
+  /// Continues a paused transfer, from its offset where that is possible and
+  /// from the start where it is not — never silently.
+  Future<TransferModel> _resumeModel(TransferModel model) async {
+    final session = _requireSession();
+    // Nothing moved yet, so there is no offset to argue about.
+    if (model.transferredBytes <= 0) return _restart(model);
+    if (model.isDownload) {
+      // The header is refreshed here: a download can sit paused for longer
+      // than a token lives.
+      if (await _service.resumeDownload(
+        model.taskId,
+        authorization: session.authorizationHeader,
+      )) {
         final resumed = model.copyWith(
           status: TransferStatus.queued,
           clearError: true,
+          clearPauseReason: true,
           updatedAt: _clock(),
         );
         await _serialized(() => _commit(resumed));
         return resumed;
       }
       return _restart(model, notice: TransferErrorKind.resumeFailed);
-    });
+    }
+    final offset = await _confirmedUploadOffset(model, session);
+    final total = model.totalBytes;
+    if (offset != null && total != null && offset >= total) {
+      // The last bytes landed before the connection died; the server has the
+      // whole file. Sending it again would leave a duplicate behind.
+      return _completeWithoutResending(model);
+    }
+    if (offset == null || offset <= 0) {
+      return _restart(model, notice: TransferErrorKind.resumeNotSupported);
+    }
+    return _restart(model, resumeFromByte: offset);
+  }
+
+  /// Marks an upload complete because the server confirmed it already holds
+  /// every byte. The stored name is looked up from the file list, the same way
+  /// an upload whose response named no file resolves it.
+  Future<TransferModel> _completeWithoutResending(TransferModel model) async {
+    final completed = model.copyWith(
+      status: TransferStatus.completed,
+      progress: 1,
+      transferredBytes: model.totalBytes,
+      clearTransient: true,
+      clearError: true,
+      clearPauseReason: true,
+      updatedAt: _clock(),
+    );
+    await _serialized(() => _commit(completed));
+    _resolveRemoteNameFromList(completed).ignore();
+    _deletePickedCopy(completed);
+    return completed;
+  }
+
+  /// Asks the server how much of this upload it still holds. Any failure is an
+  /// answer of "none": the upload restarts rather than being left stuck.
+  Future<int?> _confirmedUploadOffset(
+    TransferModel model,
+    ({String authorizationHeader}) session,
+  ) async {
+    final total = model.totalBytes;
+    if (total == null || total <= 0) return null;
+    final probed = await asyncGuard(
+      () => _resumeProbe.confirmedBytes(
+        uploadId: model.id,
+        totalBytes: total,
+        transferredBytes: model.transferredBytes,
+        authorization: session.authorizationHeader,
+      ),
+    );
+    return probed.dataOrNull;
   }
 
   @override
@@ -347,6 +458,7 @@ class TransferRepositoryImpl extends TransferRepository {
         await _reconcileWithNativeRecords();
         await _finalizePending();
       });
+      await _pruneUploadSources();
       return List<TransferEntity>.of(_transfers.values);
     });
   }
@@ -381,6 +493,18 @@ class TransferRepositoryImpl extends TransferRepository {
   Future<Result<void, Failure>> openNotificationSettings() =>
       asyncGuard(_settings.openAppSettings);
 
+  /// Releases the connectivity subscription and the update streams. The app
+  /// keeps one instance for its whole life, so in practice only tests call
+  /// this — but a repository that listens to a platform stream and cannot be
+  /// let go of is a leak waiting for the first person who needs two of them.
+  Future<void> dispose() async {
+    await _connectivitySubscription?.cancel();
+    _autoRestarts.clear();
+    _connectivitySubscription = null;
+    await _updates.close();
+    await _removed.close();
+  }
+
   @override
   Failure mapException(Object error, StackTrace stackTrace) {
     if (error is FileSystemException) {
@@ -408,6 +532,66 @@ class TransferRepositoryImpl extends TransferRepository {
     _service.events.listen(
       (event) => _serialized(() => _applyEvent(event)).ignore(),
     );
+    // Chained onto their own queue, not _serialized: both handlers go through
+    // helpers that serialize their own writes, and nesting would deadlock on
+    // the queue they are already holding. The chain still matters — a
+    // connection that drops and comes back while the parking is half done
+    // would otherwise leave transfers parked with nothing coming to start
+    // them.
+    _connectivitySubscription = _connectivity.watchOnline().listen((online) {
+      _networkQueue = _networkQueue
+          .then((_) => online ? _resumeAfterNetwork() : _pauseForNetwork())
+          .catchError((Object error, StackTrace stackTrace) {
+            logger.e(
+              'Network change handling failed',
+              error: error,
+              stackTrace: stackTrace,
+            );
+          });
+    });
+  }
+
+  /// Parks everything in flight the moment the route to the server goes away.
+  ///
+  /// Left alone, the native task spends its three retries against a dead
+  /// network and then fails, which throws away a partial download and tells
+  /// the operator nothing useful. Parking keeps the bytes and records *why*,
+  /// so the app can start again by itself and say what happened.
+  ///
+  /// Queued transfers are left alone: nothing has moved yet and the OS already
+  /// holds them until there is a network.
+  Future<void> _pauseForNetwork() async {
+    final running = _transfers.values
+        .where(
+          (transfer) =>
+              transfer.status == TransferStatus.running ||
+              transfer.status == TransferStatus.waitingToRetry,
+        )
+        .toList();
+    for (final model in running) {
+      await asyncGuard(() => _park(model.id, TransferPauseReason.noNetwork));
+    }
+  }
+
+  /// Starts the transfers the outage parked, oldest first. Transfers the
+  /// operator paused by hand are not touched — that was a decision, not an
+  /// accident.
+  Future<void> _resumeAfterNetwork() async {
+    final parked =
+        _transfers.values
+            .where((transfer) => transfer.isWaitingForNetwork)
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    for (final model in parked) {
+      if (!model.resumesWhereItStopped) {
+        final used = _autoRestarts[model.id] ?? 0;
+        if (used >= _autoRestartLimit) continue;
+        _autoRestarts[model.id] = used + 1;
+      }
+      // A resume can still fail (expired session, missing source file). It is
+      // reported on the row; one failure must not strand the rest.
+      await asyncGuard(() => _resumeModel(model));
+    }
   }
 
   Future<void> _serialized(Future<void> Function() action) {
@@ -440,13 +624,20 @@ class TransferRepositoryImpl extends TransferRepository {
   }
 
   /// Runs the transfer again on a fresh native task with a fresh token.
+  ///
+  /// With [resumeFromByte] set, the upload picks up at that offset instead of
+  /// starting over, and the progress already on screen is kept.
   Future<TransferModel> _restart(
     TransferModel model, {
     TransferErrorKind? notice,
+    int resumeFromByte = 0,
   }) async {
     final session = _requireSession();
     final oldTaskId = model.taskId;
-    final restarted = model.restartedWith(_newId(), _clock(), notice: notice);
+    final now = _clock();
+    final restarted = resumeFromByte > 0
+        ? model.resumedWith(_newId(), resumeFromByte, now)
+        : model.restartedWith(_newId(), now, notice: notice);
     await _serialized(() => _commit(restarted));
     final source = model.localPath;
     if (model.isUpload && (source == null || !await File(source).exists())) {
@@ -461,6 +652,7 @@ class TransferRepositoryImpl extends TransferRepository {
               filePath: source!,
               authorization: session.authorizationHeader,
               meta: _metaFor(restarted),
+              resumeFromByte: resumeFromByte,
             )
           : _service.enqueueDownload(
               taskId: restarted.taskId,
@@ -503,6 +695,14 @@ class TransferRepositoryImpl extends TransferRepository {
     // task was canceled on purpose, and a canceled row stays canceled.
     if (model.status == TransferStatus.canceled) return;
     if (model.isUpload && model.status == TransferStatus.paused) return;
+    // Parking a transfer that cannot pause in place cancels its native task.
+    // That cancellation is our own doing and must not turn a paused row into
+    // a canceled one.
+    if (model.status == TransferStatus.paused &&
+        event is TransferStatusEvent &&
+        event.status == TransferStatus.canceled) {
+      return;
+    }
 
     switch (event) {
       case TransferProgressEvent():
@@ -599,6 +799,21 @@ class TransferRepositoryImpl extends TransferRepository {
     asyncGuard(() => _service.deletePickedCopy(path)).ignore();
   }
 
+  /// Drops upload sources nothing refers to any more. A completed upload's
+  /// copy is deleted when it finishes; this catches the ones a crash between
+  /// the move and the database write would otherwise strand, which on a POS
+  /// terminal could be half a gigabyte sitting there for good.
+  Future<void> _pruneUploadSources() async {
+    final inUse = _transfers.values
+        .where(
+          (transfer) =>
+              transfer.isUpload && transfer.status != TransferStatus.completed,
+        )
+        .map((transfer) => transfer.localPath)
+        .whereType<String>();
+    await asyncGuard(() => _service.pruneUploadSources(inUse));
+  }
+
   /// Moves completed downloads that were not finalized yet, e.g. because the
   /// app was killed between completion and the move.
   Future<void> _finalizePending() async {
@@ -660,6 +875,7 @@ class TransferRepositoryImpl extends TransferRepository {
     if (models.isEmpty) return;
     for (final model in models) {
       _transfers.remove(model.id);
+      _autoRestarts.remove(model.id);
     }
     await _dao.deleteByIds(models.map((model) => model.id));
     for (final model in models) {
@@ -670,6 +886,10 @@ class TransferRepositoryImpl extends TransferRepository {
   }
 
   Future<void> _commit(TransferModel model) async {
+    // A transfer that got there under its own steam has earned a fresh budget.
+    if (model.status == TransferStatus.completed) {
+      _autoRestarts.remove(model.id);
+    }
     _transfers[model.id] = model;
     await _dao.upsert(model);
     _updates.add(model);

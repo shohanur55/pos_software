@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../blocs/auth/auth_bloc.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/theme_extensions.dart';
 import '../../utils/ui_messages.dart';
 import '../../widgets/common/snackbars.dart';
@@ -10,6 +11,10 @@ import '../../widgets/typography/app_text.dart';
 import 'widgets/login_form.dart';
 import 'widgets/register_portal_link.dart';
 
+/// Login screen. A short branded header on top, a card with the form in the
+/// middle, and the sign-up prompt at the bottom. The header holds the mark and
+/// the greeting; the card does the data entry; the prompt gives new users a
+/// way in.
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key, required this.serverAddress});
 
@@ -24,6 +29,9 @@ class LoginPage extends StatelessWidget {
           tone: SnackBarTone.error,
         );
       case AuthNoticeKind.portalOpenFailed:
+        // The portal now opens inside the app, so this branch is reached only
+        // if something else dispatches the legacy event; still show a tone-
+        // matched message rather than letting a snack bar go up without copy.
         context.showAppSnackBar(
           AppStrings.errorCannotOpenPortal(serverAddress),
           tone: SnackBarTone.error,
@@ -41,17 +49,58 @@ class LoginPage extends StatelessWidget {
           previous.notice != current.notice && current.notice != null,
       listener: (context, state) => _showNotice(context, state),
       child: Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: context.padding.page,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: context.sizes.formMaxWidth,
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 720;
+            return Stack(
+              children: [
+                const _BrandBackdrop(),
+                SafeArea(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: context.spacing.lg,
+                      vertical: context.spacing.lg,
+                    ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: isWide ? 460 : context.sizes.formMaxWidth,
+                        ),
+                        child: _LoginContent(serverAddress: serverAddress),
+                      ),
+                    ),
+                  ),
                 ),
-                child: _LoginContent(serverAddress: serverAddress),
-              ),
-            ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// The soft brand wash behind the card. A green gradient at the top, fading
+/// into the surface — gives the page a signature without overwhelming the
+/// form.
+class _BrandBackdrop extends StatelessWidget {
+  const _BrandBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Positioned.fill(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppTheme.brandPrimary.withValues(alpha: isDark ? 0.22 : 0.16),
+              AppTheme.brandPrimary.withValues(alpha: 0.0),
+            ],
+            stops: const [0.0, 0.45],
           ),
         ),
       ),
@@ -70,15 +119,13 @@ class _LoginContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Icon(
-          Icons.point_of_sale_rounded,
-          size: context.sizes.iconXl,
-          color: colors.primary,
-        ),
-        SizedBox(height: context.spacing.lg),
-        const HeadingLargeText(
+        SizedBox(height: context.spacing.xxl),
+        Center(child: _BrandBadge()),
+        SizedBox(height: context.spacing.xl),
+        HeadingLargeText(
           AppStrings.loginTitle,
           textAlign: TextAlign.center,
+          color: colors.textPrimary,
         ),
         SizedBox(height: context.spacing.xs),
         BodyMediumText(
@@ -87,10 +134,69 @@ class _LoginContent extends StatelessWidget {
           color: colors.textSecondary,
         ),
         SizedBox(height: context.spacing.xl),
-        const LoginForm(),
+        _LoginCard(),
         SizedBox(height: context.spacing.lg),
-        RegisterPortalLink(address: serverAddress),
+        const RegisterPortalLink(),
+        SizedBox(height: context.spacing.lg),
       ],
+    );
+  }
+}
+
+/// Small branded mark above the greeting. Stays modest so the heading
+/// dominates.
+class _BrandBadge extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppTheme.brandPrimary, AppTheme.brandPrimaryDark],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.brandPrimary.withValues(alpha: 0.30),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: const Icon(
+        Icons.point_of_sale_rounded,
+        size: 36,
+        color: Colors.white,
+      ),
+    );
+  }
+}
+
+/// White card that frames the form, with a subtle shadow so it lifts off the
+/// gradient.
+class _LoginCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.color;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: context.radius.lg,
+        border: Border.all(color: colors.outline.withValues(alpha: 0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.all(context.spacing.xl),
+      child: const LoginForm(),
     );
   }
 }

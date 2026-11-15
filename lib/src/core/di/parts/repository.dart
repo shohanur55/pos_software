@@ -9,6 +9,15 @@ void _registerRepositories() {
       () => RemoteFilesRepositoryImpl(sl(), sl()),
     )
     ..registerLazySingleton<TransferRepository>(
-      () => TransferRepositoryImpl(sl(), sl(), sl(), sl(), sl(), sl()),
+      () => TransferRepositoryImpl(
+        sl(),
+        sl(),
+        sl(),
+        sl(),
+        sl(),
+        sl(),
+        sl(),
+        sl(),
+      ),
     );
 }

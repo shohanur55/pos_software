@@ -1,5 +1,6 @@
 import '../../domain/entities/transfer_entity.dart';
 import '../../domain/entities/transfer_error_kind.dart';
+import '../../domain/entities/transfer_pause_reason.dart';
 import '../../domain/entities/transfer_status.dart';
 import '../../domain/entities/transfer_type.dart';
 import 'transfer_events.dart';
@@ -29,6 +30,8 @@ class TransferModel extends TransferEntity {
     super.errorKind,
     super.errorMessage,
     super.canPauseNatively,
+    super.pauseReason,
+    super.resumeFromByte,
     this.pendingFinalize = false,
   });
 
@@ -59,6 +62,11 @@ class TransferModel extends TransferEntity {
       },
       errorMessage: json['errorMessage'] as String?,
       canPauseNatively: json['canPauseNatively'] as bool? ?? false,
+      pauseReason: switch (json['pauseReason']) {
+        final String name => TransferPauseReason.values.asNameMap()[name],
+        _ => null,
+      },
+      resumeFromByte: (json['resumeFromByte'] as num?)?.toInt() ?? 0,
       pendingFinalize: json['pendingFinalize'] as bool? ?? false,
     );
   }
@@ -82,6 +90,8 @@ class TransferModel extends TransferEntity {
     'errorKind': errorKind?.name,
     'errorMessage': errorMessage,
     'canPauseNatively': canPauseNatively,
+    'pauseReason': pauseReason?.name,
+    'resumeFromByte': resumeFromByte,
     'pendingFinalize': pendingFinalize,
   };
 
@@ -99,26 +109,43 @@ class TransferModel extends TransferEntity {
       clearError: !failed,
       errorMessage: failed ? event.errorMessage : null,
       clearTransient: event.status != TransferStatus.running,
+      clearPauseReason: event.status != TransferStatus.paused,
       updatedAt: now,
     );
   }
 
   /// Applies a progress tick. Negative sentinel values never reach here.
+  ///
+  /// A resumed upload only puts the bytes *after* [resumeFromByte] on the
+  /// wire, so both the size and the fraction the native task reports describe
+  /// that remainder. Without rebasing them the bar would jump back to 0% and
+  /// the "transferred" figure would undercount by the offset.
   TransferModel applyProgress(TransferProgressEvent event, DateTime now) {
-    final total = event.expectedBytes ?? totalBytes;
+    final offset = isUpload ? resumeFromByte : 0;
+    final total = offset > 0 ? totalBytes : (event.expectedBytes ?? totalBytes);
+    final fraction = _rebase(
+      event.progress.clamp(0, 1).toDouble(),
+      offset,
+      total,
+    );
     return copyWith(
       status: status.isActive ? TransferStatus.running : status,
-      progress: event.progress,
+      progress: fraction,
       totalBytes: total,
       transferredBytes: total == null
           ? transferredBytes
-          : (event.progress.clamp(0, 1) * total).round(),
+          : (fraction * total).round(),
       speedBytesPerSecond: event.speedBytesPerSecond,
       timeRemaining: event.timeRemaining,
       clearSpeed: event.speedBytesPerSecond == null,
       clearTimeRemaining: event.timeRemaining == null,
       updatedAt: now,
     );
+  }
+
+  static double _rebase(double fraction, int offset, int? total) {
+    if (offset <= 0 || total == null || total <= offset) return fraction;
+    return (offset + fraction * (total - offset)) / total;
   }
 
   /// State for a fresh native task replacing the current one.
@@ -135,6 +162,26 @@ class TransferModel extends TransferEntity {
       clearTransient: true,
       clearError: notice == null,
       errorKind: notice,
+      updatedAt: now,
+      pendingFinalize: false,
+      resumeFromByte: 0,
+      clearPauseReason: true,
+    );
+  }
+
+  /// State for a fresh native task that continues from [offset] rather than
+  /// starting the file over, so the progress already on screen stays put.
+  TransferModel resumedWith(String newTaskId, int offset, DateTime now) {
+    final total = totalBytes;
+    return copyWith(
+      taskId: newTaskId,
+      status: TransferStatus.queued,
+      resumeFromByte: offset,
+      transferredBytes: offset,
+      progress: total == null || total <= 0 ? progress : offset / total,
+      clearTransient: true,
+      clearError: true,
+      clearPauseReason: true,
       updatedAt: now,
       pendingFinalize: false,
     );
@@ -157,7 +204,10 @@ class TransferModel extends TransferEntity {
     String? errorMessage,
     DateTime? updatedAt,
     bool? canPauseNatively,
+    TransferPauseReason? pauseReason,
+    int? resumeFromByte,
     bool? pendingFinalize,
+    bool clearPauseReason = false,
     bool clearError = false,
     bool clearTransient = false,
     bool clearSpeed = false,
@@ -189,6 +239,10 @@ class TransferModel extends TransferEntity {
           ? errorMessage
           : (errorMessage ?? this.errorMessage),
       canPauseNatively: canPauseNatively ?? this.canPauseNatively,
+      pauseReason: clearPauseReason
+          ? pauseReason
+          : (pauseReason ?? this.pauseReason),
+      resumeFromByte: resumeFromByte ?? this.resumeFromByte,
       pendingFinalize: pendingFinalize ?? this.pendingFinalize,
     );
   }
