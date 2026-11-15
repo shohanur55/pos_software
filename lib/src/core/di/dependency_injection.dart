@@ -1,0 +1,82 @@
+import 'package:get_it/get_it.dart';
+
+import '../../data/repositories/authentication_repository_impl.dart';
+import '../../data/repositories/remote_files_repository_impl.dart';
+import '../../data/repositories/transfer_repository_impl.dart';
+import '../../data/services/cache/cache_service.dart';
+import '../../data/services/cache/session_storage.dart';
+import '../../data/services/database/app_database.dart';
+import '../../data/services/database/remote_file_dao.dart';
+import '../../data/services/database/transfer_dao.dart';
+import '../../data/services/file_picker/file_picker_service_impl.dart';
+import '../../data/services/network/auth_interceptor.dart';
+import '../../data/services/network/dio_factory.dart';
+import '../../data/services/network/endpoints.dart';
+import '../../data/services/network/rest_client.dart';
+import '../../data/services/network/session_events.dart';
+import '../../data/services/system/connectivity_service_impl.dart';
+import '../../data/services/system/external_link_service_impl.dart';
+import '../../data/services/system/file_inspector_impl.dart';
+import '../../data/services/system/system_settings_service.dart';
+import '../../data/services/transfer/background_transfer_service.dart';
+import '../../domain/repositories/authentication_repository.dart';
+import '../../domain/repositories/remote_files_repository.dart';
+import '../../domain/repositories/transfer_repository.dart';
+import '../../domain/services/connectivity_service.dart';
+import '../../domain/services/external_link_service.dart';
+import '../../domain/services/file_inspector.dart';
+import '../../domain/services/file_picker_service.dart';
+import '../../domain/usecases/auth/get_session_use_case.dart';
+import '../../domain/usecases/auth/login_use_case.dart';
+import '../../domain/usecases/auth/logout_use_case.dart';
+import '../../domain/usecases/auth/open_registration_portal_use_case.dart';
+import '../../domain/usecases/auth/watch_session_expired_use_case.dart';
+import '../../domain/usecases/files/delete_remote_file_use_case.dart';
+import '../../domain/usecases/files/get_cached_files_use_case.dart';
+import '../../domain/usecases/files/refresh_remote_files_use_case.dart';
+import '../../domain/usecases/files/validate_upload_file_use_case.dart';
+import '../../domain/usecases/system/watch_connectivity_use_case.dart';
+import '../../domain/usecases/transfers/cancel_transfer_use_case.dart';
+import '../../domain/usecases/transfers/clear_finished_transfers_use_case.dart';
+import '../../domain/usecases/transfers/get_notification_permission_use_case.dart';
+import '../../domain/usecases/transfers/get_transfers_use_case.dart';
+import '../../domain/usecases/transfers/open_notification_settings_use_case.dart';
+import '../../domain/usecases/transfers/open_transfer_file_use_case.dart';
+import '../../domain/usecases/transfers/pause_transfer_use_case.dart';
+import '../../domain/usecases/transfers/remove_transfer_use_case.dart';
+import '../../domain/usecases/transfers/request_notification_permission_use_case.dart';
+import '../../domain/usecases/transfers/resume_transfer_use_case.dart';
+import '../../domain/usecases/transfers/resync_transfers_use_case.dart';
+import '../../domain/usecases/transfers/retry_transfer_use_case.dart';
+import '../../domain/usecases/transfers/start_download_use_case.dart';
+import '../../domain/usecases/transfers/start_upload_use_case.dart';
+import '../../domain/usecases/transfers/watch_transfer_notification_taps_use_case.dart';
+import '../../domain/usecases/transfers/watch_transfers_use_case.dart';
+import '../../presentation/blocs/auth/auth_bloc.dart';
+import '../../presentation/blocs/connectivity/connectivity_cubit.dart';
+import '../../presentation/blocs/files/files_bloc.dart';
+import '../../presentation/blocs/notification_permission/notification_permission_cubit.dart';
+import '../../presentation/blocs/transfer/transfer_bloc.dart';
+import '../../presentation/blocs/upload/upload_bloc.dart';
+import '../../presentation/router/app_navigation_service.dart';
+import '../../presentation/router/router.dart';
+import '../config/app_config.dart';
+
+part 'parts/blocs.dart';
+part 'parts/externals.dart';
+part 'parts/navigation.dart';
+part 'parts/repository.dart';
+part 'parts/services.dart';
+part 'parts/use_cases.dart';
+
+/// Composition root: the only place that binds `data` to `domain`.
+final GetIt sl = GetIt.instance;
+
+Future<void> setupDependencies() async {
+  await _registerExternals();
+  _registerServices();
+  _registerRepositories();
+  _registerUseCases();
+  _registerBlocs();
+  _registerNavigation();
+}
