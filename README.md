@@ -29,6 +29,8 @@ flutter run
 
 Server URL is in `lib/src/data/services/network/endpoints.dart` — change `Endpoints.baseUrl` to point to your server.
 
+> **Account:** Tap **"Create an account"** on the login screen — the registration portal opens inside the app (no external browser needed).
+
 ## Issues Found & Fixed
 
 1. **Upload pause/resume → server limitation** — Server only accepts one complete multipart POST. When paused or connection drops, upload restarts from zero. This is a **server-side limitation**. The app detects this automatically and warns the user on-screen before they pause. If the server ever supports resumable uploads, the app will use it without code change.
