@@ -193,10 +193,10 @@ Config: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 | `logger` | Debug logging |
 | `path` | File path manipulation |
 
-## Tests
+## Testing
 
-322 tests, no device needed — `flutter test`
+Two kinds of tests, all run with `flutter test` (no device needed):
 
-> 4 of these are golden (pixel-comparison) tests. Font rendering differs between macOS and Linux, so they run locally and are excluded on CI via `--exclude-tags golden`.
+- **Unit tests** — logic, data and state layers: parsers, validators, formatters, SQLite DAOs, repositories, and BLoCs, all with mocked dependencies.
+- **Widget tests** — UI and user flows: individual widgets plus integration-style flow tests that drive the whole app (upload, download, notification tap, offline recovery) against mocked repositories, and golden (pixel-snapshot) tests.
 
-Covers: parsers, validation, formatting, SQLite round-trips, offline fallback, pause/resume behaviour, upload source safety, connectivity probing, resume negotiation, all blocs, notification tap routing, full app flows, and layout at 8 device sizes × 2 text scales with overflow checks.
