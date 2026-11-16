@@ -60,8 +60,8 @@ void main() {
         createdAt: fixedNow.subtract(Duration(minutes: index * 7)),
         updatedAt: fixedNow.subtract(Duration(minutes: index * 7)),
       ),
-    // Paused carries the longest copy in the app — it has to say why it
-    // stopped and what resuming will cost — so both readings get a row.
+    // Paused carries the longest copy in the app (why it stopped and what
+    // resuming costs), so both readings get a row.
     for (final (index, reason) in TransferPauseReason.values.indexed)
       TransferEntity(
         id: 'paused-$index',

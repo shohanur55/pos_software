@@ -6,8 +6,7 @@ import '../../../domain/services/connectivity_service.dart';
 import 'server_reachability.dart';
 
 /// Reports whether the server can actually be reached, not merely whether a
-/// network interface is up. See [ServerReachability] for why the difference
-/// matters on a shop floor.
+/// network interface is up. See [ServerReachability] for why that matters.
 class ConnectivityServiceImpl implements ConnectivityService {
   ConnectivityServiceImpl({
     Connectivity? connectivity,

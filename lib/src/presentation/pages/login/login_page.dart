@@ -11,10 +11,7 @@ import '../../widgets/typography/app_text.dart';
 import 'widgets/login_form.dart';
 import 'widgets/register_portal_link.dart';
 
-/// Login screen. A short branded header on top, a card with the form in the
-/// middle, and the sign-up prompt at the bottom. The header holds the mark and
-/// the greeting; the card does the data entry; the prompt gives new users a
-/// way in.
+/// Login screen: branded header, a card with the form, and the sign-up prompt.
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key, required this.serverAddress});
 
@@ -29,9 +26,8 @@ class LoginPage extends StatelessWidget {
           tone: SnackBarTone.error,
         );
       case AuthNoticeKind.portalOpenFailed:
-        // The portal now opens inside the app, so this branch is reached only
-        // if something else dispatches the legacy event; still show a tone-
-        // matched message rather than letting a snack bar go up without copy.
+        // The portal opens in-app now, so this branch runs only if something
+        // dispatches the legacy event; still show a tone-matched message.
         context.showAppSnackBar(
           AppStrings.errorCannotOpenPortal(serverAddress),
           tone: SnackBarTone.error,
@@ -81,9 +77,8 @@ class LoginPage extends StatelessWidget {
   }
 }
 
-/// The soft brand wash behind the card. A green gradient at the top, fading
-/// into the surface — gives the page a signature without overwhelming the
-/// form.
+/// Soft brand wash behind the card: a green gradient at the top fading into
+/// the surface.
 class _BrandBackdrop extends StatelessWidget {
   const _BrandBackdrop();
 
@@ -143,8 +138,7 @@ class _LoginContent extends StatelessWidget {
   }
 }
 
-/// Small branded mark above the greeting. Stays modest so the heading
-/// dominates.
+/// Small branded mark above the greeting.
 class _BrandBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -175,8 +169,7 @@ class _BrandBadge extends StatelessWidget {
   }
 }
 
-/// White card that frames the form, with a subtle shadow so it lifts off the
-/// gradient.
+/// White card that frames the form, lifted off the gradient with a soft shadow.
 class _LoginCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

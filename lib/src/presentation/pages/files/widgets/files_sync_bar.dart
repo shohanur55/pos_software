@@ -7,9 +7,8 @@ import '../../../theme/theme_extensions.dart';
 import '../../../utils/ui_messages.dart';
 import '../../../widgets/typography/app_text.dart';
 
-/// Tells the user how fresh the list is: syncing, synced a moment ago, or
-/// an offline copy. Rendered as a pill with an icon and a tone-matched tint —
-/// a POS operator needs to know whether what they see is real.
+/// Shows how fresh the list is: syncing, synced a moment ago, or an offline
+/// copy. Rendered as a pill with an icon and a tone-matched tint.
 class FilesSyncBar extends StatelessWidget {
   const FilesSyncBar({super.key});
 

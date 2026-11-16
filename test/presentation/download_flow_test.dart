@@ -22,8 +22,8 @@ import '../helpers/test_app.dart';
 void main() {
   const report = RemoteFileEntity(
     name: 'report.csv',
-    // The address the list endpoint returned, which is what the download has
-    // to use — not one the app guessed from the name.
+    // The address the list endpoint returned, which is what the download uses,
+    // not one the app guessed from the name.
     url: 'http://server.test:90/get?file=report.csv',
     sizeBytes: 8 * 1024 * 1024,
   );

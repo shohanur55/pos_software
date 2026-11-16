@@ -7,44 +7,29 @@ import '../network/endpoints.dart';
 
 /// Asks the upload endpoint how much of an interrupted upload it still holds.
 ///
-/// Every resumable-upload protocol in common use answers the same question the
-/// same way: send the upload's identity with `Content-Range: bytes *​/<total>`
-/// and an empty body, and a server that supports resuming replies `308` with a
-/// `Range: bytes=0-<last>` header naming the last byte it has. A server that
-/// does not support it answers something else, and there is nothing to resume.
-///
-/// The endpoint this app ships against takes a single multipart `POST` and has
-/// no resumable variant, so the probe returns `null` there and the caller
-/// restarts the upload instead. Keeping the negotiation in one small class is
-/// what makes that a configuration fact rather than a rewrite: point the app at
-/// an endpoint that speaks the convention — tus, S3 multipart, Google's
-/// resumable protocol — and uploads continue from their offset with no other
-/// change.
+/// Sends `Content-Range: bytes *​/<total>` with an empty body. A resumable
+/// server replies `308` with a `Range: bytes=0-<last>` header; anything else
+/// means there is nothing to resume. This endpoint takes a single multipart
+/// `POST` and has no resumable variant, so the probe returns `null` and the
+/// caller restarts the upload. Pointing the app at a tus/S3/Google-style
+/// endpoint turns offset resume on with no other change.
 class UploadResumeProbe {
   UploadResumeProbe(this._dio, this._cache);
 
   final Dio _dio;
   final CacheService _cache;
 
-  /// Below this there is nothing worth negotiating for: re-sending a few
-  /// megabytes costs less than a round trip, and a server that does not
-  /// support resuming never sees a probe at all for ordinary uploads.
+  // Below this, re-sending costs less than a round trip, so don't negotiate.
   static const int minimumBytesWorthResuming = 8 * 1024 * 1024;
 
-  /// Marks a request that is only asking what the endpoint can do, rather
-  /// than about a particular upload.
+  // Marks a request that only asks what the endpoint can do.
   static const String _capabilityCheckId = 'capability-check';
 
-  /// What is already known about this endpoint: `true` it can continue an
-  /// interrupted upload, `false` it cannot, `null` nobody has asked yet.
+  // Known support for this endpoint: true/false, or null if nobody has asked.
   bool? get cachedSupport => _cachedVerdict();
 
-  /// Settles the question at the start of the first upload instead of waiting
-  /// until someone pauses one.
-  ///
-  /// Knowing early is what lets the app say "this server can't continue an
-  /// interrupted upload" *before* the operator pauses a 300 MB file, rather
-  /// than apologising afterwards. One small request per server per install.
+  // Settles the question at the first upload, so the UI can warn before a pause
+  // rather than apologise after. One small request per server per install.
   Future<bool?> ensureChecked({
     required int totalBytes,
     required String authorization,
@@ -59,8 +44,8 @@ class UploadResumeProbe {
     return _cachedVerdict();
   }
 
-  /// Bytes the server confirms it already holds for [uploadId], or `null` when
-  /// this endpoint cannot resume uploads and the file has to be sent again.
+  // Bytes the server confirms it holds for uploadId, or null if this endpoint
+  // can't resume and the file must be sent again.
   Future<int?> confirmedBytes({
     required String uploadId,
     required int totalBytes,
@@ -98,14 +83,12 @@ class UploadResumeProbe {
         ),
       );
       final offset = _offsetFrom(response, totalBytes);
-      // One unsupported answer settles it for this server; the app never
-      // probes that endpoint again.
+      // One answer settles it for this server; cache the verdict.
       await _remember(supported: offset != null);
       return offset;
     } on DioException catch (error) {
-      // A probe that could not complete says nothing about the server, so the
-      // verdict is not cached. The upload restarts this time and the question
-      // is asked again next time.
+      // A probe that couldn't complete says nothing, so don't cache; the upload
+      // restarts this time and the question is asked again next time.
       logger.d('Upload resume probe failed: ${error.type.name}');
       return null;
     }
@@ -130,8 +113,8 @@ class UploadResumeProbe {
     return bare != null && bare >= 0 && bare <= totalBytes ? bare : null;
   }
 
-  /// Scoped to the configured server: pointing the app at a different host
-  /// must not inherit the previous one's answer.
+  // Scoped to the configured server so a different host doesn't inherit the
+  // previous one's answer.
   bool? _cachedVerdict() {
     final stored = _cache.readJson(StorageKeys.uploadResumeSupport);
     if (stored == null || stored['host'] != Endpoints.baseUrl) return null;

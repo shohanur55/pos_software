@@ -40,8 +40,7 @@ void main() {
   setUp(() {
     dio = MockDio();
     cache = MockCacheService();
-    // A tiny real store, so a verdict the probe writes is a verdict it can
-    // read back — which is the whole point of caching it.
+    // A tiny real store, so a verdict the probe writes can be read back.
     final stored = <String, Map<String, dynamic>>{};
     when(() => cache.readJson(any())).thenAnswer(
       (invocation) => stored[invocation.positionalArguments.first as String],

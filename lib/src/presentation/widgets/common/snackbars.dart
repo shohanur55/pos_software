@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import '../../theme/theme_extensions.dart';
 import '../typography/app_text.dart';
 
-/// How loud a transient message is. The tone picks the colours, the icon and
-/// how long the message stays on screen.
+/// Tone of a transient message; picks the colours, icon and dwell time.
 enum SnackBarTone { info, success, warning, error }
 
 extension SnackBars on BuildContext {
@@ -53,8 +52,7 @@ SnackBar buildAppSnackBar(
       side: BorderSide(color: palette.border),
     ),
     duration: palette.duration,
-    // A long file name must push the action onto its own line rather than
-    // squeeze it, which is what the Material default does at 25%.
+    // Push a long message's action onto its own line instead of squeezing it.
     actionOverflowThreshold: 0.5,
     action: hasAction
         ? SnackBarAction(
@@ -91,7 +89,7 @@ class _SnackContent extends StatelessWidget {
   }
 }
 
-/// Colours, icon and dwell time for one [SnackBarTone].
+// Colours, icon and dwell time for one SnackBarTone.
 class _SnackPalette {
   const _SnackPalette({
     required this.background,
@@ -107,8 +105,8 @@ class _SnackPalette {
       SnackBarTone.info => _SnackPalette(
         background: colors.primaryContainer,
         foreground: colors.onPrimaryContainer,
-        // Keep the accent high-contrast against primaryContainer — the brand
-        // green itself is too close to the container to clear WCAG AA.
+        // Keep the accent high-contrast against primaryContainer; the brand
+        // green is too close to the container to clear WCAG AA.
         accent: colors.onPrimaryContainer,
         icon: Icons.info_outline_rounded,
         duration: const Duration(seconds: 4),

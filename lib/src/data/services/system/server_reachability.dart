@@ -2,13 +2,11 @@ import 'package:dio/dio.dart';
 
 import '../network/endpoints.dart';
 
-/// Answers one question: can this device actually reach the server right now?
+/// Checks whether the device can actually reach the server right now.
 ///
-/// `connectivity_plus` only reports whether a network *interface* is up. A
-/// terminal joined to a cafe hotspot behind a captive portal, or to a shop
-/// router whose uplink is down, reports Wi-Fi and is still unreachable. Acting
-/// on that alone makes the app announce "back online" and burn its one
-/// automatic retry against a dead route.
+/// connectivity_plus only reports whether an interface is up. A device behind a
+/// captive portal, or on a router with a dead uplink, shows Wi-Fi but can't
+/// reach the server; acting on that alone wastes the one automatic retry.
 class ServerReachability {
   ServerReachability({Dio? dio, Duration timeout = const Duration(seconds: 6)})
     : _dio =
@@ -22,13 +20,11 @@ class ServerReachability {
             ),
           );
 
-  /// Deliberately a bare client: no auth interceptor, so no token is ever
-  /// attached to a probe.
+  // Bare client: no auth interceptor, so no token is attached to a probe.
   final Dio _dio;
 
-  /// Any HTTP answer proves the route works, including `401` or `405` — this
-  /// asks whether the server is *reachable*, not whether we may talk to it.
-  /// Only a transport-level failure counts as offline.
+  // Any HTTP answer (including 401 or 405) proves the route works; only a
+  // transport-level failure counts as offline.
   Future<bool> canReachServer() async {
     try {
       await _dio.request<void>(

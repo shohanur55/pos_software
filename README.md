@@ -125,7 +125,7 @@ GitHub Actions — runs on every push and PR to `main`.
 | Step | What it does |
 |---|---|
 | **Analyze** | `dart format` check + `flutter analyze` |
-| **Test** | `flutter test --coverage` (322 tests) |
+| **Test** | `flutter test --exclude-tags golden --coverage` (318 tests; goldens run locally) |
 | **Build APK** | `flutter build apk --debug` + uploads artifact |
 
 Config: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
@@ -196,5 +196,7 @@ Config: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 ## Tests
 
 322 tests, no device needed — `flutter test`
+
+> 4 of these are golden (pixel-comparison) tests. Font rendering differs between macOS and Linux, so they run locally and are excluded on CI via `--exclude-tags golden`.
 
 Covers: parsers, validation, formatting, SQLite round-trips, offline fallback, pause/resume behaviour, upload source safety, connectivity probing, resume negotiation, all blocs, notification tap routing, full app flows, and layout at 8 device sizes × 2 text scales with overflow checks.

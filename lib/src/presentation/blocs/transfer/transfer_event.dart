@@ -84,8 +84,7 @@ final class FinishedTransfersCleared extends TransferEvent {
   const FinishedTransfersCleared();
 }
 
-/// The device is back online: transfers that died on the network are
-/// retried once, the way a POS terminal picks up where it left off.
+/// The device is back online: transfers that died on the network are retried once.
 final class ConnectionRestored extends TransferEvent {
   const ConnectionRestored();
 }

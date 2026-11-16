@@ -175,7 +175,7 @@ void main() {
       final resumed = paused.resumedWith('task-2', 800, now);
 
       // The native task is halfway through the 200 bytes it was given, which
-      // is 900 of 1000 bytes of the file — not 50%.
+      // is 900 of 1000 bytes of the file, not 50%.
       final ticked = resumed.applyProgress(
         const TransferProgressEvent('task-2', null, progress: 0.5),
         now,

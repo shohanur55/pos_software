@@ -5,10 +5,9 @@ import '../../../core/constants/app_strings.dart';
 import '../../theme/theme_extensions.dart';
 import '../../widgets/typography/app_text.dart';
 
-/// In-app sign-up portal. The server renders the registration form itself, so
-/// the app frames that page in a WebView and lets the user come back to login
-/// from the header's back button or the system back gesture — the WebView
-/// handles its own in-page back stack first.
+/// In-app sign-up portal. The server renders the registration form, so the app
+/// frames it in a WebView. Back returns to login, after the WebView's own
+/// in-page back stack.
 class SignupWebViewPage extends StatefulWidget {
   const SignupWebViewPage({
     super.key,
@@ -44,8 +43,8 @@ class _SignupWebViewPageState extends State<SignupWebViewPage> {
           }),
           onPageFinished: (_) => setState(() => _loading = false),
           onWebResourceError: (error) {
-            // The main-frame failures are what we want to show the user. Sub-
-            // resource errors (favicon, trackers) are noisy and harmless.
+            // Only show main-frame failures; sub-resource errors (favicon,
+            // trackers) are noisy and harmless.
             if (error.isForMainFrame ?? true) {
               setState(() {
                 _loading = false;

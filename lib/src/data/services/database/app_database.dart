@@ -3,16 +3,15 @@ import 'package:sqflite/sqflite.dart';
 
 /// Opens and migrates the local database.
 ///
-/// A POS terminal is regularly offline, so transfer history and the file list
-/// live on the device and the app works from them until the server answers.
+/// Transfer history and the cached file list live on the device so the app
+/// works offline until the server answers.
 class AppDatabase {
   AppDatabase({DatabaseFactory? factory, String? path})
     : _factory = factory ?? databaseFactory,
       _path = path ?? '';
 
-  /// 1 — first release.
-  /// 2 — `pauseReason` and `resumeFromByte`, for transfers parked by a dropped
-  ///     connection and for uploads that continue from an offset.
+  // v1: first release.
+  // v2: pauseReason + resumeFromByte (network-parked transfers, offset uploads).
   static const int schemaVersion = 2;
   static const String fileName = 'pos_transfers.db';
 
@@ -23,7 +22,7 @@ class AppDatabase {
   final String _path;
   Future<Database>? _opening;
 
-  /// Opened once and shared; concurrent callers await the same future.
+  // Opened once and shared; concurrent callers await the same future.
   Future<Database> get database => _opening ??= _open();
 
   Future<Database> _open() async {
@@ -82,10 +81,9 @@ class AppDatabase {
     await batch.commit(noResult: true);
   }
 
-  /// Runs each step between the installed version and the current one, so an
-  /// app that skipped a release still arrives at the right schema. Without
-  /// this an upgrade opens an old table and every write fails on a missing
-  /// column — on a terminal that is already in a shop, with history in it.
+  // Runs each step between the installed version and the current one, so an
+  // app that skipped a release still arrives at the right schema. Without this
+  // an upgrade opens an old table and every write fails on a missing column.
   Future<void> _upgrade(Database db, int from, int to) async {
     final batch = db.batch();
     if (from < 2) {

@@ -39,7 +39,9 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: dart run build_runner build --delete-conflicting-outputs
-      - run: flutter test --coverage
+      # Golden tests are host-platform specific (font rendering differs between
+      # macOS and Linux), so they are excluded on CI and run locally instead.
+      - run: flutter test --exclude-tags golden --coverage
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -41,12 +41,9 @@ abstract class TransferRepository extends Repository {
 
   Future<Result<void, Failure>> openFile(String id);
 
-  /// Whether this server can continue an interrupted upload: `true` it can,
-  /// `false` it cannot and a paused upload will be sent again from the start,
-  /// `null` nobody has asked yet.
-  ///
-  /// The UI states this up front rather than letting an operator discover it
-  /// after pausing a half-finished 300 MB file.
+  /// Whether this server can continue an interrupted upload: true it can, false
+  /// a paused upload restarts from zero, null nobody has asked yet. The UI
+  /// states this up front rather than after a pause.
   Stream<bool?> watchUploadResumeSupport();
 
   /// The current answer to [watchUploadResumeSupport], for the first build.

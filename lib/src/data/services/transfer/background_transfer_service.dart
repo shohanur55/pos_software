@@ -22,10 +22,9 @@ enum OpenFileOutcome { opened, notFound, noApp }
 
 /// The only class that talks to `background_downloader`.
 ///
-/// Events are delivered through single-subscription streams on purpose: they
-/// buffer whatever the plugin replays during [init] (transfers that finished
-/// while the app was dead, a notification tap that cold-started the app)
-/// until the repository starts listening.
+/// Uses single-subscription streams so events the plugin replays during [init]
+/// (transfers finished while the app was dead, a cold-start notification tap)
+/// buffer until the repository starts listening.
 class BackgroundTransferService {
   BackgroundTransferService({
     FileDownloader? downloader,
@@ -46,8 +45,8 @@ class BackgroundTransferService {
 
   Stream<TransferNotificationTapEntity> get notificationTaps => _taps.stream;
 
-  /// Configures the plugin, registers callbacks and replays background events.
-  /// Must run in `main()` before `runApp` so cold-start taps are captured.
+  // Configures the plugin, registers callbacks and replays background events.
+  // Must run in main() before runApp so cold-start taps are captured.
   Future<void> init(TransferNotificationTexts texts) async {
     if (_initialized) return;
     _initialized = true;
@@ -81,15 +80,10 @@ class BackgroundTransferService {
 
   Future<void> resumeFromBackground() => _downloader.resumeFromBackground();
 
-  /// Starts an upload, optionally continuing one the server already holds
-  /// part of.
-  ///
-  /// A fresh upload is the documented multipart `POST`. A resumed one sends
-  /// only the bytes from [resumeFromByte] onward as a raw body, with the
-  /// offset stated in `Range` (which the plugin reads to seek the file) and in
-  /// `Content-Range` (which the server reads to place them). The caller only
-  /// passes an offset after [UploadResumeProbe] confirmed the server can take
-  /// one, so this never guesses.
+  // Starts an upload. A fresh one is a multipart POST; a resumed one sends only
+  // the bytes from resumeFromByte onward as a raw body, with the offset in
+  // Range (plugin seeks the file) and Content-Range (server places them). The
+  // caller only passes an offset after the probe confirmed the server accepts it.
   Future<void> enqueueUpload({
     required String taskId,
     required String filePath,
@@ -157,15 +151,10 @@ class BackgroundTransferService {
     return task is DownloadTask && await _downloader.pause(task);
   }
 
-  /// Continues a paused download from the byte it stopped at.
-  ///
-  /// [authorization] replaces the header the task was created with. A download
-  /// can sit paused for longer than a token lives — overnight, or across a
-  /// re-login — and the plugin would otherwise replay the stale header and
-  /// collect a 401 that looks like a resume failure.
-  ///
-  /// Returns `false` when the plugin cannot resume, e.g. the partial file is
-  /// gone or the server stopped accepting ranges.
+  // Continues a paused download from where it stopped. authorization replaces
+  // the task's original header, since a download can stay paused longer than a
+  // token lives and the stale header would collect a 401. Returns false when
+  // the plugin cannot resume (partial file gone, server stopped accepting ranges).
   Future<bool> resumeDownload(String taskId, {String? authorization}) async {
     final task = await _taskFor(taskId);
     if (task is! DownloadTask) return false;
@@ -177,7 +166,7 @@ class BackgroundTransferService {
     return _downloader.resume(refreshed);
   }
 
-  /// Whether the server accepted range requests for a running download.
+  // Whether the server accepted range requests for a running download.
   Future<bool> canResume(String taskId) async {
     final task = await _taskFor(taskId);
     return task is DownloadTask && await _downloader.taskCanResume(task);
@@ -191,7 +180,7 @@ class BackgroundTransferService {
   Future<void> deleteRecord(String taskId) =>
       _downloader.database.deleteRecordWithId(taskId);
 
-  /// Last known native state of a task, or `null` if the plugin forgot it.
+  // Last known native state of a task, or null if the plugin forgot it.
   Future<TransferStatusEvent?> recordedStatus(String taskId) async {
     final record = await _downloader.database.recordForId(taskId);
     return record == null ? null : TransferTaskMapper.fromRecord(record);
@@ -212,13 +201,10 @@ class BackgroundTransferService {
         .toList();
   }
 
-  /// Moves a completed download to its user-visible location.
-  ///
-  /// Android: public `Downloads/<AppName>` via MediaStore. iOS: the file already
-  /// lives in Documents, which the Files app exposes.
-  ///
-  /// Idempotent: if the process died right after an earlier move, the file is
-  /// found in shared storage instead of being reported missing.
+  // Moves a completed download to its user-visible location: Android public
+  // Downloads/<AppName> via MediaStore, iOS already in Documents. Idempotent:
+  // if the process died after an earlier move, the file is found in shared
+  // storage rather than reported missing.
   Future<String> finalizeDownload(String fileName) async {
     final source = await downloadPath(fileName);
     final sourceExists = await File(source).exists();
@@ -235,8 +221,8 @@ class BackgroundTransferService {
         SharedStorage.downloads,
         directory: AppConstants.downloadFolderName,
       );
-      // Before Android 10 the plugin returns the expected path without
-      // checking that the file is there.
+      // Before Android 10 the plugin returns the expected path without checking
+      // the file is there.
       final found =
           moved != null &&
           (await _usesScopedStorage() || await File(moved).exists());
@@ -253,13 +239,13 @@ class BackgroundTransferService {
       mimeType: lookupMimeType(fileName),
     );
     // The move is refused when the legacy storage permission was denied
-    // (Android 9 and lower). The download itself succeeded, so keep it in
-    // private storage where it can still be opened from the app.
+    // (Android 9 and below). The download succeeded, so keep it in private
+    // storage where it can still be opened from the app.
     return moved ?? source;
   }
 
-  /// Android 9 and lower need the legacy storage permission to save into
-  /// public Downloads. Newer versions report it as granted.
+  // Android 9 and below need the legacy storage permission to save into public
+  // Downloads. Newer versions report it as granted.
   Future<void> ensureSharedStoragePermission() async {
     if (!Platform.isAndroid) return;
     final permissions = _downloader.permissions;
@@ -271,7 +257,7 @@ class BackgroundTransferService {
     }
   }
 
-  /// Opens a finished download with whatever app handles its type.
+  // Opens a finished download with whatever app handles its type.
   Future<OpenFileOutcome> openDownload({
     required String fileName,
     required String? savedPath,
@@ -285,21 +271,12 @@ class BackgroundTransferService {
     return opened ? OpenFileOutcome.opened : OpenFileOutcome.noApp;
   }
 
-  /// Moves the picker's copy of an upload out of the cache directory and
-  /// returns where it ended up.
-  ///
-  /// The file picker hands back a copy it wrote into the app's cache. Android
-  /// is free to purge that directory whenever storage runs short, and an
-  /// upload can be waiting a long time — parked overnight for Wi-Fi, or sitting
-  /// failed until someone retries it. Losing a 500 MB source file in the
-  /// meantime turns a resumable situation into "Upload source is gone".
-  ///
-  /// Both directories live inside the app's own container, so this is a
-  /// rename: instant, and it needs no second copy of the file. The fallbacks
-  /// exist only for the case where that assumption is wrong somewhere.
-  ///
-  /// A path outside the app's sandbox belongs to the user and is returned
-  /// untouched.
+  // Moves the picker's copy out of the cache dir and returns the new path. The
+  // picker writes into the app cache, which Android can purge while an upload
+  // waits (parked for Wi-Fi, or failed until retried), losing the source. Both
+  // dirs are in the app container, so this is a rename (no second copy); the
+  // fallbacks cover the case where that doesn't hold. A path outside the
+  // sandbox belongs to the user and is returned untouched.
   Future<String> retainUploadSource(String pickedPath) async {
     final source = File(pickedPath);
     if (!await _isAppOwnedCopy(pickedPath) || !await source.exists()) {
@@ -308,7 +285,7 @@ class BackgroundTransferService {
     final directory = Directory(await _uploadSourceDirectory());
     if (p.equals(p.dirname(pickedPath), directory.path)) return pickedPath;
     await directory.create(recursive: true);
-    // Two uploads of the same file name must not land on each other.
+    // Stamp the name so two uploads of the same file don't collide.
     final stamp = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
     final target = p.join(directory.path, '${stamp}_${p.basename(pickedPath)}');
     try {
@@ -327,9 +304,8 @@ class BackgroundTransferService {
     }
   }
 
-  /// Deletes files left in the upload folder that no transfer refers to any
-  /// more, e.g. because the app died between the move and the row being
-  /// written. Without this a crash would strand the file forever.
+  // Deletes upload-folder files no transfer refers to any more, e.g. stranded
+  // when the app died between the move and the row being written.
   Future<void> pruneUploadSources(Iterable<String> inUse) async {
     final directory = Directory(await _uploadSourceDirectory());
     if (!await directory.exists()) return;
@@ -341,8 +317,7 @@ class BackgroundTransferService {
     }
   }
 
-  /// Deletes the copy made for an upload. Files outside the app's own storage
-  /// are never touched.
+  // Deletes the copy made for an upload. Files outside app storage are never touched.
   Future<void> deletePickedCopy(String path) async {
     if (!await _isAppOwnedCopy(path)) return;
     final file = File(path);
@@ -363,8 +338,8 @@ class BackgroundTransferService {
 
   Future<String?> _openTarget(String fileName, String? savedPath) async {
     if (Platform.isIOS) {
-      // The app container path changes between launches, so a stored
-      // absolute path cannot be trusted; rebuild it.
+      // The app container path changes between launches, so a stored absolute
+      // path can't be trusted; rebuild it.
       final path = await downloadPath(fileName);
       return await File(path).exists() ? path : null;
     }
@@ -384,7 +359,7 @@ class BackgroundTransferService {
     return await File(savedPath).exists() ? savedPath : null;
   }
 
-  /// Android 10 (API 29) introduced scoped storage and MediaStore downloads.
+  // Android 10 (API 29) introduced scoped storage and MediaStore downloads.
   Future<bool> _usesScopedStorage() async {
     final sdk = int.tryParse(await _downloader.platformVersion()) ?? 0;
     return sdk >= 29;

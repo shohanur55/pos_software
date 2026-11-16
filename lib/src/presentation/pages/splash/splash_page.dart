@@ -5,14 +5,8 @@ import '../../theme/app_theme.dart';
 import '../../theme/theme_extensions.dart';
 import '../../widgets/typography/app_text.dart';
 
-/// First frame the user sees. Stays up while `AuthBloc` resolves the stored
-/// session; the router leaves this page as soon as the status is known.
-///
-/// The composition is a single on-brand surface: a soft radial glow, the mark
-/// in a rounded tile that scales in, the product name, a muted tagline, and a
-/// slim progress bar at the bottom. No long animation, no bounce — the point
-/// is to look polished during the few hundred milliseconds the splash is on
-/// screen, not to be a loading screen in its own right.
+/// First frame the user sees. Stays up while AuthBloc resolves the stored
+/// session; the router leaves this page once the status is known.
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
 
@@ -59,9 +53,7 @@ class _SplashPageState extends State<SplashPage>
         builder: (context, _) => Stack(
           fit: StackFit.expand,
           children: [
-            // Brand glow in the upper third: a subtle radial wash of the
-            // primary green that fades into the surface. Keeps the page from
-            // looking empty without competing with the mark.
+            // Subtle radial wash of the primary green in the upper third.
             DecoratedBox(
               decoration: BoxDecoration(
                 gradient: RadialGradient(
@@ -133,8 +125,7 @@ class _SplashPageState extends State<SplashPage>
   }
 }
 
-/// The brand mark: a rounded green tile with the POS icon and a subtle
-/// highlight. Matches what the launcher icon should eventually look like.
+/// Rounded green tile with the app icon and a subtle highlight.
 class _BrandMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

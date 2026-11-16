@@ -17,8 +17,8 @@ List<RouteBase> _authRoutes() => [
     name: Routes.signupName,
     builder: (context, state) => SignupWebViewPage(
       url: sl<AppConfig>().serverAddress,
-      // Pop back to the login screen rather than letting GoRouter fall into the
-      // redirect — the user hasn't signed in yet, so the stack is just login.
+      // Pop back to login rather than letting GoRouter fall into the redirect;
+      // the user hasn't signed in yet, so the stack is just login.
       onClose: () {
         if (context.canPop()) {
           context.pop();

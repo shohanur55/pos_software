@@ -4,15 +4,13 @@ import 'app_colors.dart';
 import 'app_dimensions.dart';
 
 abstract final class AppTheme {
-  /// POS-green brand seed. Chosen for the "checkout confirmed" feel: close to
-  /// the success colour, calm against greys, printable on white receipts.
+  // Brand green seed, close to the success colour.
   static const Color brandPrimary = Color(0xFF28A744);
 
-  /// Darker shade for gradient headers and pressed states.
+  // Darker shade for gradient headers and pressed states.
   static const Color brandPrimaryDark = Color(0xFF1C7A33);
 
-  /// Warm amber used sparingly for emphasis: pinned items, portal hint,
-  /// upload-ready affordance. Reads clearly on both brand green and surface.
+  // Amber accent for emphasis (pinned items, portal hint, upload-ready).
   static const Color brandAccent = Color(0xFFFFB020);
 
   static ThemeData get light => _build(Brightness.light);
@@ -24,9 +22,8 @@ abstract final class AppTheme {
       seedColor: brandPrimary,
       brightness: brightness,
     );
-    // Lock the primary to the exact brand green rather than Material's tonal
-    // mix. Keep the rest of the generated scheme so secondary roles still
-    // harmonise.
+    // Lock primary to the exact brand green rather than Material's tonal mix;
+    // keep the rest of the generated scheme.
     final scheme = base.copyWith(
       primary: brandPrimary,
       onPrimary: Colors.white,

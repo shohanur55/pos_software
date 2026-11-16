@@ -10,9 +10,8 @@ import '../../../widgets/common/dashed_border.dart';
 import '../../../widgets/typography/app_text.dart';
 
 /// The drop zone that starts file selection. The whole surface is tappable,
-/// not just the button — easier on a counter-top tablet. The dashed border
-/// and the brand-green gradient badge make it read as the page's primary
-/// affordance.
+/// not just the button. Dashed border and a green gradient badge mark it as
+/// the page's primary action.
 class PickFileCard extends StatelessWidget {
   const PickFileCard({super.key, required this.isPicking});
 

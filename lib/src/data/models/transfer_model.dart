@@ -114,12 +114,9 @@ class TransferModel extends TransferEntity {
     );
   }
 
-  /// Applies a progress tick. Negative sentinel values never reach here.
-  ///
-  /// A resumed upload only puts the bytes *after* [resumeFromByte] on the
-  /// wire, so both the size and the fraction the native task reports describe
-  /// that remainder. Without rebasing them the bar would jump back to 0% and
-  /// the "transferred" figure would undercount by the offset.
+  // Applies a progress tick. A resumed upload only sends the bytes after
+  // resumeFromByte, so the size and fraction describe that remainder; rebase
+  // them onto the whole file so the bar doesn't jump back to 0%.
   TransferModel applyProgress(TransferProgressEvent event, DateTime now) {
     final offset = isUpload ? resumeFromByte : 0;
     final total = offset > 0 ? totalBytes : (event.expectedBytes ?? totalBytes);

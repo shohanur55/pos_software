@@ -289,9 +289,8 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
         transfer.status == TransferStatus.failed &&
         previous?.status != TransferStatus.failed;
 
-    // The repository parks running transfers when the route to the server
-    // disappears, and starts them again by itself when it comes back. Both are
-    // things that happened *to* the operator's work, so both are announced.
+    // The repository parks running transfers when the server becomes
+    // unreachable and resumes them when it returns; announce both.
     final justParked =
         transfer.isWaitingForNetwork && previous?.isWaitingForNetwork != true;
     final justBackOnline =

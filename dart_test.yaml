@@ -1,0 +1,4 @@
+tags:
+  golden:
+    description: Pixel-comparison golden tests. Host-platform specific, so they
+      run only on the machine that generated the images (excluded in CI).

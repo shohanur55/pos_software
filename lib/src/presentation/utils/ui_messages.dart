@@ -67,13 +67,8 @@ abstract final class UiMessages {
         TransferStatus.canceled => AppStrings.statusCanceled,
       };
 
-  /// What a paused transfer will do when it starts again, or `null` when it
-  /// is not paused.
-  ///
-  /// Stating this while the transfer sits still is the whole point: an
-  /// operator deciding whether to wait for the shop Wi-Fi or walk the terminal
-  /// to a different one needs to know whether the 400 MB already sent survives
-  /// the wait.
+  // What a paused transfer will do on resume, or null when it isn't paused.
+  // Shown while paused so the user knows whether the bytes already sent survive.
   static String? pausedDetail(TransferEntity transfer) {
     if (transfer.status != TransferStatus.paused) return null;
     final keepsPlace = transfer.resumesWhereItStopped;

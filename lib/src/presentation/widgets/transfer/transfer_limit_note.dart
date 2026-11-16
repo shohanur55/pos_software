@@ -6,14 +6,10 @@ import '../../theme/theme_extensions.dart';
 import '../../utils/ui_messages.dart';
 import '../typography/app_text.dart';
 
-/// The one line under a transfer that explains what is about to happen to it:
-/// what a paused transfer will do when it resumes, or — for an upload on a
-/// server that cannot continue an interrupted one — that pausing costs the
-/// whole file.
-///
-/// The second case is deliberately shown while the upload is still *running*.
-/// Learning it from a snackbar after already pausing a 300 MB file is too
-/// late to be any use.
+/// The line under a transfer explaining what will happen to it: what a paused
+/// transfer does on resume, or (for an upload on a server that can't resume)
+/// that pausing costs the whole file. The second case shows while the upload
+/// is still running, so the user learns it before pausing rather than after.
 class TransferLimitNote extends StatelessWidget {
   const TransferLimitNote({
     super.key,
@@ -23,10 +19,10 @@ class TransferLimitNote extends StatelessWidget {
 
   final TransferEntity transfer;
 
-  /// Only ever true once the server has actually been asked and said no.
+  // Only true once the server has been asked and said no.
   final bool serverCannotResumeUploads;
 
-  /// The text for [transfer], or `null` when there is nothing worth saying.
+  // The text for [transfer], or null when there's nothing to say.
   static String? messageFor(
     TransferEntity transfer, {
     required bool serverCannotResumeUploads,

@@ -15,9 +15,8 @@ import 'package:pos_software/src/presentation/router/routes.dart';
 import '../helpers/fixtures.dart';
 import '../helpers/test_app.dart';
 
-/// Covers the requirement that a completion notification, once tapped, puts
-/// the operator on a screen that means something — from a running app and from
-/// one that the tap itself started.
+/// Covers the requirement that a completion notification, once tapped, opens a
+/// relevant screen, both from a running app and from one the tap cold-started.
 void main() {
   late TestApp app;
 
@@ -215,7 +214,7 @@ void main() {
       );
       await settle(tester);
 
-      // Still on login — a tap must never jump past authentication.
+      // Still on login; a tap must never jump past authentication.
       expect(location(), Routes.login);
 
       await signIn(tester);
