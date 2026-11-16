@@ -31,32 +31,23 @@ Server URL is in `lib/src/data/services/network/endpoints.dart` — change `Endp
 
 ## Issues Found & Fixed
 
-**Upload pause/resume → server limitation**
-The server only accepts one complete multipart POST — no resumable upload protocol. When an upload is paused or the connection drops, it has to start over from zero. This is a **server-side limitation**, not an app bug. The app detects this automatically and tells the user on-screen before they pause. If the server ever supports resumable uploads ( S3, etc.), the app will use it without any code change.
+1. **Upload pause/resume → server limitation** — Server only accepts one complete multipart POST. When paused or connection drops, upload restarts from zero. This is a **server-side limitation**. The app detects this automatically and warns the user on-screen before they pause. If the server ever supports resumable uploads, the app will use it without code change.
 
-**Download pause/resume → works fully**
-The server supports HTTP Range requests (`206 Partial Content`). Downloads pause and resume from the exact byte they stopped at, even across app restarts. Verified against the real server.
+2. **Download pause/resume → works fully** — Server supports HTTP Range requests (`206 Partial Content`). Downloads pause and resume from the exact byte, even across app restarts.
 
-**Connection loss destroyed partial downloads**
-Previously, losing the internet would fail the transfer and lose all progress. Now transfers are parked immediately when the connection drops, keeping the partial file intact. They auto-resume when the connection returns.
+3. **Connection loss destroyed partial downloads** — Transfers now park immediately on connection loss, keeping the partial file intact. Auto-resume when connection returns.
 
-**"Online" didn't mean reachable**
-`connectivity_plus` only reports if an interface is up — a captive portal or dead router looks like working Wi-Fi. Now every connectivity check includes a server reachability probe. Re-checks every 15 seconds while a link exists but the server is unreachable.
+4. **"Online" didn't mean reachable** — `connectivity_plus` only reports interface status. A captive portal looks like working Wi-Fi. Now every check includes a server reachability probe with 15s re-check.
 
-**Expired token on resume**
-A download paused overnight would resume with the old token and get a 401. Now the session is re-read and the header refreshed at resume time.
+5. **Expired token on resume** — Downloads paused overnight resumed with an expired token. Now the session is re-read and header refreshed at resume time.
 
-**Upload source file disappeared from cache**
-The file picker copies files into the app's cache directory, which Android can purge anytime. Large uploads waiting for Wi-Fi could lose their source file. Now the picked copy is moved to a safe directory (`upload_sources/`) before the upload starts.
+6. **Upload source file disappeared from cache** — File picker copies to cache directory, which Android can purge. Now the copy is moved to a safe directory (`upload_sources/`) before upload starts.
 
-**No database migration**
-Adding new columns without `onUpgrade` would crash every existing install. Now SQLite migrations run step by step, so devices that skip a version still get the right schema.
+7. **No database migration** — No `onUpgrade` meant schema changes would crash existing installs. Now SQLite migrations run step by step.
 
-**Flapping connection re-sent files endlessly**
-A connection dropping and returning repeatedly would restart the same upload each time. Auto-restarts are now capped at 3 per transfer; after that it waits for the user.
+8. **Flapping connection re-sent files endlessly** — Auto-restarts now capped at 3 per transfer; after that it waits for the user.
 
-**Progress jumped to 0% on resumed uploads**
-The native task only reports progress for the remaining bytes. Now progress is rebased onto the full file size, so the bar continues smoothly from where it stopped.
+9. **Progress jumped to 0% on resumed uploads** — Native task only reports remaining bytes. Now progress is rebased onto the full file size.
 
 ## Working Offline
 
@@ -124,6 +115,81 @@ Each transfer has a stable app-level ID. The native task ID can change on retry/
 - **iOS unverified** — configured but never built or device-tested (no Xcode available)
 
 **With more time:** upload queue for batch imports, checksum verification after download, per-transfer settings (Wi-Fi only, priority), proper migration test suite as schema grows.
+
+## CI/CD
+
+GitHub Actions — runs on every push and PR to `main`.
+
+| Step | What it does |
+|---|---|
+| **Analyze** | `dart format` check + `flutter analyze` |
+| **Test** | `flutter test --coverage` (322 tests) |
+| **Build APK** | `flutter build apk --debug` + uploads artifact |
+
+Config: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Login</b></td>
+    <td align="center"><b>Upload in Progress</b></td>
+    <td align="center"><b>Files & Download</b></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/login.png" width="220"/></td>
+    <td><img src="screenshots/upload_progress.png" width="220"/></td>
+    <td><img src="screenshots/download_progress.png" width="220"/></td>
+  </tr>
+  <tr>
+    <td>Sign in screen. Accounts created on web portal.</td>
+    <td>27% upload · 74.4 MB / 280 MB · 1.6 MB/s · 3 min left. Pause/cancel buttons. Persistent banner at bottom shows global transfer status.</td>
+    <td>Files tab with server file list. Download button per file. Active download shows inline progress bar (15%). Persistent banner stays visible across all tabs.</td>
+  </tr>
+  <tr>
+    <td align="center"><b>Transfer Dashboard</b></td>
+    <td align="center"><b>System Notification</b></td>
+    <td></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/dashboard.png" width="220"/></td>
+    <td><img src="screenshots/notification.png" width="220"/></td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>Transfers tab — central dashboard with filter chips (All / Active / Completed). Download at 30% · 84.4 MB / 280 MB · 1.7 MB/s.</td>
+    <td>Persistent system-tray notification while app is backgrounded. Shows file name and progress bar. Tapping returns to the relevant screen.</td>
+    <td></td>
+  </tr>
+</table>
+
+---
+
+## Packages & Why
+
+| Package | Purpose |
+|---|---|
+| `flutter_bloc` / `bloc` | State management (BLoC pattern) |
+| `equatable` | Value equality for BLoC states & entities |
+| `get_it` | Dependency injection (service locator) |
+| `go_router` | Declarative routing with deep-link support |
+| `dio` / `retrofit` | HTTP client for API calls (login, file list, delete) |
+| `dart_mappable` | JSON serialization/deserialization |
+| `background_downloader` | Native background upload/download with notifications |
+| `file_picker` | File selection from device storage |
+| `connectivity_plus` | Network interface monitoring |
+| `sqflite` | Local SQLite database for offline cache |
+| `shared_preferences` | Session token storage |
+| `permission_handler` | Runtime notification permission (Android 13+) |
+| `url_launcher` | Open registration portal in browser |
+| `webview_flutter` | In-app web content |
+| `stream_transform` | Stream throttle/debounce for progress events |
+| `mime` | File MIME type detection for validation |
+| `intl` | Date/number formatting |
+| `logger` | Debug logging |
+| `path` | File path manipulation |
 
 ## Tests
 
