@@ -106,9 +106,14 @@ Each transfer has a stable app-level ID. The native task ID can change on retry/
 | Notifications | Full support, needs runtime permission (Android 13+) | Completion/failure only while suspended |
 | Upload pause | Pauses (restarts if server can't resume) | Not supported by OS |
 
-**Android specifics:** foreground service with `dataSync` type for long transfers; scoped storage via MediaStore (no permissions needed); notification permission asked only on first transfer, not at launch.
+**Android platform limits:**
+- **9-minute worker limit** — WorkManager kills ordinary workers at ~9 min; transfers run as a foreground service (`dataSync` type) to lift this
+- **Doze / battery optimisation** — OEM battery managers (Xiaomi, Samsung, etc.) can still delay or kill foreground services; user may need to exempt the app
+- **Force-stop** — cancels all pending work; stale tasks are marked failed after 2 min so they can be retried
+- **Scoped storage** — downloads land via MediaStore into `Downloads/POS Software`, no permission needed
+- **Notification permission** — required on Android 13+; asked on first transfer with rationale, not at launch; refusing doesn't block transfers
 
-**iOS:** configured with background URLSession and `UIFileSharingEnabled` 
+**iOS:** configured with background URLSession and `UIFileSharingEnabled`. Force-quitting from app switcher cancels pending transfers. Progress notifications can't update while suspended (completion/failure still fire).
 
 ## What's Not Finished
 
@@ -116,7 +121,9 @@ Each transfer has a stable app-level ID. The native task ID can change on retry/
 - **HTTPS** — cleartext enabled only because the test server is HTTP; production needs TLS
 - **No token refresh** — 24h token with no renewal endpoint; expiry sends user to login
 - **Session storage** — currently in SharedPreferences; production should use Keystore/Keychain
+- **iOS unverified** — configured but never built or device-tested (no Xcode available)
 
+**With more time:** upload queue for batch imports, checksum verification after download, per-transfer settings (Wi-Fi only, priority), proper migration test suite as schema grows.
 
 ## Tests
 
