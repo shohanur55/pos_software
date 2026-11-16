@@ -12,6 +12,7 @@ void _registerBlocs() {
       () => TransferBloc(
         getTransfers: sl(),
         watchTransfers: sl(),
+        watchUploadResumeSupport: sl(),
         resyncTransfers: sl(),
         startDownload: sl(),
         pauseTransfer: sl(),

@@ -104,6 +104,17 @@ abstract final class AppStrings {
   static const String uploadRemoveFile = 'Remove file';
   static const String uploadBackgroundHint =
       'You can leave this screen. The upload continues in the background.';
+  // Shown on every upload in flight once the server has told us it cannot
+  // continue an interrupted one, so pausing is never a surprise.
+  static const String uploadNoResumeNote =
+      'This server can\'t continue an interrupted upload. Pausing or losing '
+      'the connection means sending the file again from the beginning.';
+  static const String pauseUploadConfirmTitle = 'Pause this upload?';
+  static String pauseUploadConfirmBody(String sent) =>
+      'This server can\'t continue an interrupted upload, so the $sent already '
+      'sent will have to go again from the beginning.';
+  static const String pauseAnyway = 'Pause anyway';
+  static const String keepUploading = 'Keep uploading';
   static String pausedResumesFrom(String position) =>
       'Continues from $position when resumed.';
   static const String pausedStartsOver =

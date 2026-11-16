@@ -31,6 +31,34 @@ class UploadResumeProbe {
   /// support resuming never sees a probe at all for ordinary uploads.
   static const int minimumBytesWorthResuming = 8 * 1024 * 1024;
 
+  /// Marks a request that is only asking what the endpoint can do, rather
+  /// than about a particular upload.
+  static const String _capabilityCheckId = 'capability-check';
+
+  /// What is already known about this endpoint: `true` it can continue an
+  /// interrupted upload, `false` it cannot, `null` nobody has asked yet.
+  bool? get cachedSupport => _cachedVerdict();
+
+  /// Settles the question at the start of the first upload instead of waiting
+  /// until someone pauses one.
+  ///
+  /// Knowing early is what lets the app say "this server can't continue an
+  /// interrupted upload" *before* the operator pauses a 300 MB file, rather
+  /// than apologising afterwards. One small request per server per install.
+  Future<bool?> ensureChecked({
+    required int totalBytes,
+    required String authorization,
+  }) async {
+    final known = _cachedVerdict();
+    if (known != null || totalBytes <= 0) return known;
+    await _ask(
+      uploadId: _capabilityCheckId,
+      totalBytes: totalBytes,
+      authorization: authorization,
+    );
+    return _cachedVerdict();
+  }
+
   /// Bytes the server confirms it already holds for [uploadId], or `null` when
   /// this endpoint cannot resume uploads and the file has to be sent again.
   Future<int?> confirmedBytes({
@@ -43,6 +71,18 @@ class UploadResumeProbe {
       return null;
     }
     if (_cachedVerdict() == false) return null;
+    return _ask(
+      uploadId: uploadId,
+      totalBytes: totalBytes,
+      authorization: authorization,
+    );
+  }
+
+  Future<int?> _ask({
+    required String uploadId,
+    required int totalBytes,
+    required String authorization,
+  }) async {
     try {
       final response = await _dio.post<void>(
         Endpoints.upload,

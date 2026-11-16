@@ -75,8 +75,9 @@ void main() {
   Future<List<TransferAction>> pump(
     WidgetTester tester,
     TransferEntity transfer,
-    double textScale,
-  ) async {
+    double textScale, {
+    bool serverCannotResumeUploads = false,
+  }) async {
     final tapped = <TransferAction>[];
     tester.view
       ..physicalSize = const Size(320, 900)
@@ -96,6 +97,7 @@ void main() {
               child: TransferTile(
                 transfer: transfer,
                 onAction: tapped.add,
+                serverCannotResumeUploads: serverCannotResumeUploads,
                 now: fixedNow,
               ),
             ),
@@ -156,5 +158,64 @@ void main() {
       find.text('The server ran into a problem. Please try again in a moment.'),
       findsOneWidget,
     );
+  });
+
+  group('an upload on a server that cannot resume', () {
+    const warning =
+        'This server can\'t continue an interrupted upload. Pausing or losing '
+        'the connection means sending the file again from the beginning.';
+
+    for (final scale in [1.0, 1.3]) {
+      testWidgets('is warned about while it is still running at ${scale}x', (
+        tester,
+      ) async {
+        await pump(
+          tester,
+          transfer(fileName: longName, status: TransferStatus.running),
+          scale,
+          serverCannotResumeUploads: true,
+        );
+
+        // Said while the upload runs, not after someone has already paused it.
+        expect(find.text(warning), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('keeps the warning once it is paused', (tester) async {
+      await pump(
+        tester,
+        transfer(fileName: longName, status: TransferStatus.paused),
+        1,
+        serverCannotResumeUploads: true,
+      );
+
+      expect(find.text(warning), findsOneWidget);
+    });
+
+    testWidgets('says nothing until the server has been asked', (tester) async {
+      await pump(
+        tester,
+        transfer(fileName: longName, status: TransferStatus.running),
+        1,
+      );
+
+      expect(find.text(warning), findsNothing);
+    });
+
+    testWidgets('never blames the server for a download', (tester) async {
+      await pump(
+        tester,
+        transfer(
+          fileName: longName,
+          type: TransferType.download,
+          status: TransferStatus.running,
+        ),
+        1,
+        serverCannotResumeUploads: true,
+      );
+
+      expect(find.text(warning), findsNothing);
+    });
   });
 }

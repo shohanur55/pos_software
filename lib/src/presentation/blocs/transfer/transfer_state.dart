@@ -22,6 +22,7 @@ final class TransferState extends Equatable {
     this.status = TransferListStatus.initial,
     this.transfers = const [],
     this.acknowledgedFailureIds = const {},
+    this.uploadResumeSupported,
     this.notice,
   });
 
@@ -30,6 +31,15 @@ final class TransferState extends Equatable {
   /// Active and paused first, then newest first.
   final List<TransferEntity> transfers;
   final Set<String> acknowledgedFailureIds;
+
+  /// Whether the server can continue an interrupted upload. `null` until the
+  /// first upload settles the question.
+  final bool? uploadResumeSupported;
+
+  /// `true` only once the server has actually said it cannot, so the UI never
+  /// blames an endpoint nobody has asked yet.
+  bool get uploadsRestartFromStart => uploadResumeSupported == false;
+
   final UiNotice<TransferNoticeKind>? notice;
 
   List<TransferEntity> get activeTransfers =>
@@ -88,6 +98,7 @@ final class TransferState extends Equatable {
     TransferListStatus? status,
     List<TransferEntity>? transfers,
     Set<String>? acknowledgedFailureIds,
+    bool? uploadResumeSupported,
     UiNotice<TransferNoticeKind>? notice,
   }) {
     return TransferState(
@@ -95,6 +106,8 @@ final class TransferState extends Equatable {
       transfers: transfers ?? this.transfers,
       acknowledgedFailureIds:
           acknowledgedFailureIds ?? this.acknowledgedFailureIds,
+      uploadResumeSupported:
+          uploadResumeSupported ?? this.uploadResumeSupported,
       notice: notice ?? this.notice,
     );
   }
@@ -104,6 +117,7 @@ final class TransferState extends Equatable {
     status,
     transfers,
     acknowledgedFailureIds,
+    uploadResumeSupported,
     notice,
   ];
 }

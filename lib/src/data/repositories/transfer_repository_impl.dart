@@ -62,6 +62,8 @@ class TransferRepositoryImpl extends TransferRepository {
       StreamController<TransferEntity>.broadcast();
   final StreamController<String> _removed =
       StreamController<String>.broadcast();
+  final StreamController<bool?> _uploadResumeSupport =
+      StreamController<bool?>.broadcast();
 
   /// Serializes everything that mutates [_transfers], so native events and
   /// user actions never interleave halfway through an update.
@@ -104,6 +106,12 @@ class TransferRepositoryImpl extends TransferRepository {
   Stream<String> watchRemovedTransfers() => _removed.stream;
 
   @override
+  Stream<bool?> watchUploadResumeSupport() => _uploadResumeSupport.stream;
+
+  @override
+  bool? get uploadResumeSupport => _resumeProbe.cachedSupport;
+
+  @override
   Future<Result<TransferEntity, Failure>> startUpload(
     UploadRequestEntity request,
   ) {
@@ -119,6 +127,9 @@ class TransferRepositoryImpl extends TransferRepository {
       // Taken out of the cache directory first: the OS may purge that while
       // the upload is parked or waiting to be retried.
       final source = await _service.retainUploadSource(request.filePath);
+      // Asked alongside the first upload, not when someone finally pauses one,
+      // so the screen can say what pausing will cost before they do it.
+      _checkUploadResumeSupport(session, request.sizeBytes);
       final now = _clock();
       final id = _newId();
       final model = TransferModel(
@@ -321,6 +332,26 @@ class TransferRepositoryImpl extends TransferRepository {
     return completed;
   }
 
+  /// Settles, in the background, whether this endpoint can continue an
+  /// interrupted upload, and tells anyone listening once it knows.
+  void _checkUploadResumeSupport(
+    ({String authorizationHeader}) session,
+    int totalBytes,
+  ) {
+    if (_resumeProbe.cachedSupport != null) return;
+    asyncGuard(
+      () => _resumeProbe.ensureChecked(
+        totalBytes: totalBytes,
+        authorization: session.authorizationHeader,
+      ),
+    ).then((result) => _publishUploadResumeSupport()).ignore();
+  }
+
+  void _publishUploadResumeSupport() {
+    if (_uploadResumeSupport.isClosed) return;
+    _uploadResumeSupport.add(_resumeProbe.cachedSupport);
+  }
+
   /// Asks the server how much of this upload it still holds. Any failure is an
   /// answer of "none": the upload restarts rather than being left stuck.
   Future<int?> _confirmedUploadOffset(
@@ -337,6 +368,7 @@ class TransferRepositoryImpl extends TransferRepository {
         authorization: session.authorizationHeader,
       ),
     );
+    _publishUploadResumeSupport();
     return probed.dataOrNull;
   }
 
@@ -503,6 +535,7 @@ class TransferRepositoryImpl extends TransferRepository {
     _connectivitySubscription = null;
     await _updates.close();
     await _removed.close();
+    await _uploadResumeSupport.close();
   }
 
   @override
@@ -718,7 +751,27 @@ class TransferRepositoryImpl extends TransferRepository {
     TransferStatusEvent event,
   ) async {
     if (model.status == TransferStatus.completed) return;
+    // The native side fails a download whose pause could not keep its place —
+    // the server refused the range, or the partial file went missing. From
+    // where the operator is standing they pressed Pause and it is paused; it
+    // just has to start over when they come back to it. Showing "Failed" for
+    // a deliberate pause would be both alarming and wrong.
+    if (model.isDownload &&
+        model.status == TransferStatus.paused &&
+        event.status == TransferStatus.failed &&
+        event.errorKind == TransferErrorKind.resumeFailed) {
+      await _commit(
+        model.copyWith(canPauseNatively: false, updatedAt: _clock()),
+      );
+      return;
+    }
     var next = model.applyStatus(event, _clock());
+    // A download is only ever reported as paused once its partial file and
+    // byte offset have been written down, so this is proof — not a guess —
+    // that resuming will carry on from there.
+    if (event.status == TransferStatus.paused && model.isDownload) {
+      next = next.copyWith(canPauseNatively: true);
+    }
     if (event.status == TransferStatus.completed) {
       if (model.isUpload) {
         final stored = RemoteFilesParser.parseUploaded(event.responseBody);

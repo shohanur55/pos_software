@@ -9,6 +9,7 @@ import '../../utils/ui_messages.dart';
 import '../typography/app_text.dart';
 import 'transfer_action.dart';
 import 'transfer_action_buttons.dart';
+import 'transfer_limit_note.dart';
 import 'transfer_progress_bar.dart';
 import 'transfer_stats_row.dart';
 import 'transfer_status_chip.dart';
@@ -21,12 +22,16 @@ class TransferTile extends StatelessWidget {
     required this.transfer,
     required this.onAction,
     this.highlighted = false,
+    this.serverCannotResumeUploads = false,
     this.now,
   });
 
   final TransferEntity transfer;
   final ValueChanged<TransferAction> onAction;
   final bool highlighted;
+
+  /// The server has been asked and cannot continue an interrupted upload.
+  final bool serverCannotResumeUploads;
 
   /// Reference time for the relative timestamp; defaults to the clock.
   final DateTime? now;
@@ -101,16 +106,10 @@ class TransferTile extends StatelessWidget {
               color: colors.warning,
             ),
           ],
-          if (UiMessages.pausedDetail(transfer) case final detail?) ...[
-            SizedBox(height: context.spacing.sm),
-            BodySmallText(
-              detail,
-              color: transfer.resumesWhereItStopped
-                  ? colors.textSecondary
-                  : colors.warning,
-              maxLines: 3,
-            ),
-          ],
+          TransferLimitNote(
+            transfer: transfer,
+            serverCannotResumeUploads: serverCannotResumeUploads,
+          ),
           if (transfer.status == TransferStatus.completed &&
               transfer.savedPath != null) ...[
             SizedBox(height: context.spacing.sm),

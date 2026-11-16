@@ -40,8 +40,16 @@ void main() {
   setUp(() {
     dio = MockDio();
     cache = MockCacheService();
-    when(() => cache.readJson(any())).thenReturn(null);
-    when(() => cache.writeJson(any(), any())).thenAnswer((_) async {});
+    // A tiny real store, so a verdict the probe writes is a verdict it can
+    // read back — which is the whole point of caching it.
+    final stored = <String, Map<String, dynamic>>{};
+    when(() => cache.readJson(any())).thenAnswer(
+      (invocation) => stored[invocation.positionalArguments.first as String],
+    );
+    when(() => cache.writeJson(any(), any())).thenAnswer((invocation) async {
+      stored[invocation.positionalArguments.first as String] =
+          invocation.positionalArguments[1] as Map<String, dynamic>;
+    });
     probe = UploadResumeProbe(dio, cache);
   });
 
@@ -116,8 +124,10 @@ void main() {
   );
 
   test('a verdict recorded for a different server is ignored', () async {
-    when(() => cache.readJson(StorageKeys.uploadResumeSupport))
-        .thenReturn({'host': 'http://elsewhere', 'supported': false});
+    await cache.writeJson(StorageKeys.uploadResumeSupport, {
+      'host': 'http://elsewhere',
+      'supported': false,
+    });
     serverAnswers(
       answer(
         308,
@@ -158,4 +168,64 @@ void main() {
       verifyNever(() => cache.writeJson(any(), any()));
     },
   );
+
+  group('settling the question before anyone pauses', () {
+    test('nothing is known until the endpoint has been asked', () {
+      expect(probe.cachedSupport, isNull);
+    });
+
+    test('the first upload settles it, and it is remembered', () async {
+      serverAnswers(answer(400));
+
+      expect(
+        await probe.ensureChecked(
+          totalBytes: total,
+          authorization: 'Bearer token',
+        ),
+        isFalse,
+      );
+      verify(
+        () => cache.writeJson(StorageKeys.uploadResumeSupport, {
+          'host': Endpoints.baseUrl,
+          'supported': false,
+        }),
+      ).called(1);
+    });
+
+    test('a settled question is not asked again', () async {
+      await cache.writeJson(StorageKeys.uploadResumeSupport, {
+        'host': Endpoints.baseUrl,
+        'supported': false,
+      });
+
+      expect(
+        await probe.ensureChecked(
+          totalBytes: total,
+          authorization: 'Bearer token',
+        ),
+        isFalse,
+      );
+      verifyNever(() => dio.post<void>(any(), options: any(named: 'options')));
+    });
+
+    test('an unreachable server leaves the question open', () async {
+      when(() => dio.post<void>(any(), options: any(named: 'options')))
+          .thenThrow(
+            DioException.connectionError(
+              requestOptions: RequestOptions(path: Endpoints.upload),
+              reason: 'no route',
+            ),
+          );
+
+      // Not "false": the app must not tell an operator this endpoint cannot
+      // resume when all that happened was a dropped connection.
+      expect(
+        await probe.ensureChecked(
+          totalBytes: total,
+          authorization: 'Bearer token',
+        ),
+        isNull,
+      );
+    });
+  });
 }

@@ -355,6 +355,65 @@ void main() {
     );
 
     test(
+      'a download reported paused is known to have kept its place',
+      () async {
+        when(() => dao.all())
+            .thenAnswer((_) async => [download('a', canPauseNatively: false)]);
+        await repository.getTransfers();
+
+        // The native side only reports paused once the partial file and offset
+        // are stored, so the row can stop hedging about what resume will do.
+        taskEvents.add(
+          const TransferStatusEvent(
+            'task-a',
+            null,
+            status: TransferStatus.paused,
+          ),
+        );
+        await settle();
+
+        final paused = captureCommitted().last;
+        expect(paused.status, TransferStatus.paused);
+        expect(paused.canPauseNatively, isTrue);
+        expect(paused.resumesWhereItStopped, isTrue);
+      },
+    );
+
+    test(
+      'a pause the server refuses stays paused rather than failing',
+      () async {
+        when(() => dao.all()).thenAnswer(
+          (_) async => [
+            download(
+              'a',
+              status: TransferStatus.paused,
+              canPauseNatively: true,
+              pauseReason: TransferPauseReason.user,
+            ),
+          ],
+        );
+        await repository.getTransfers();
+
+        taskEvents.add(
+          const TransferStatusEvent(
+            'task-a',
+            null,
+            status: TransferStatus.failed,
+            errorKind: TransferErrorKind.resumeFailed,
+          ),
+        );
+        await settle();
+
+        final row = captureCommitted().last;
+        // The operator asked for a pause and got one; what changed is only
+        // that it will have to start over.
+        expect(row.status, TransferStatus.paused);
+        expect(row.errorKind, isNull);
+        expect(row.resumesWhereItStopped, isFalse);
+      },
+    );
+
+    test(
       'resuming an upload the server cannot continue starts it over',
       () async {
         when(

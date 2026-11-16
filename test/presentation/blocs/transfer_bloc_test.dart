@@ -21,6 +21,7 @@ import 'package:pos_software/src/domain/usecases/transfers/resync_transfers_use_
 import 'package:pos_software/src/domain/usecases/transfers/retry_transfer_use_case.dart';
 import 'package:pos_software/src/domain/usecases/transfers/start_download_use_case.dart';
 import 'package:pos_software/src/domain/usecases/transfers/watch_transfers_use_case.dart';
+import 'package:pos_software/src/domain/usecases/transfers/watch_upload_resume_support_use_case.dart';
 import 'package:pos_software/src/presentation/blocs/transfer/transfer_bloc.dart';
 
 import '../../helpers/fixtures.dart';
@@ -30,6 +31,7 @@ void main() {
   late MockTransferRepository repository;
   late StreamController<TransferEntity> updates;
   late StreamController<String> removed;
+  late StreamController<bool?> resumeSupport;
 
   setUpAll(() => registerFallbackValue(remoteCsv));
 
@@ -37,9 +39,13 @@ void main() {
     repository = MockTransferRepository();
     updates = StreamController<TransferEntity>.broadcast();
     removed = StreamController<String>.broadcast();
+    resumeSupport = StreamController<bool?>.broadcast();
     when(() => repository.watchTransfers()).thenAnswer((_) => updates.stream);
     when(() => repository.watchRemovedTransfers())
         .thenAnswer((_) => removed.stream);
+    when(() => repository.watchUploadResumeSupport())
+        .thenAnswer((_) => resumeSupport.stream);
+    when(() => repository.uploadResumeSupport).thenReturn(null);
     when(() => repository.getTransfers())
         .thenAnswer((_) async => const Success([]));
   });
@@ -47,11 +53,13 @@ void main() {
   tearDown(() async {
     await updates.close();
     await removed.close();
+    await resumeSupport.close();
   });
 
   TransferBloc build() => TransferBloc(
     getTransfers: GetTransfersUseCase(repository),
     watchTransfers: WatchTransfersUseCase(repository),
+    watchUploadResumeSupport: WatchUploadResumeSupportUseCase(repository),
     resyncTransfers: ResyncTransfersUseCase(repository),
     startDownload: StartDownloadUseCase(repository),
     pauseTransfer: PauseTransferUseCase(repository),
@@ -449,6 +457,44 @@ void main() {
       verify: (bloc) {
         expect(bloc.state.notice?.kind, TransferNoticeKind.autoResumed);
       },
+    );
+  });
+
+  group('what the server can do with an interrupted upload', () {
+    blocTest<TransferBloc, TransferState>(
+      'starts out unknown, so nothing is claimed about the server',
+      build: build,
+      verify: (bloc) {
+        expect(bloc.state.uploadResumeSupported, isNull);
+        expect(bloc.state.uploadsRestartFromStart, isFalse);
+      },
+    );
+
+    blocTest<TransferBloc, TransferState>(
+      'picks up the answer once the server gives one',
+      build: build,
+      act: (bloc) async {
+        bloc.add(const TransfersStarted());
+        await Future<void>.delayed(Duration.zero);
+        resumeSupport.add(false);
+      },
+      wait: const Duration(milliseconds: 10),
+      verify: (bloc) {
+        expect(bloc.state.uploadResumeSupported, isFalse);
+        expect(bloc.state.uploadsRestartFromStart, isTrue);
+      },
+    );
+
+    blocTest<TransferBloc, TransferState>(
+      'an endpoint that can resume is not warned about',
+      build: build,
+      act: (bloc) async {
+        bloc.add(const TransfersStarted());
+        await Future<void>.delayed(Duration.zero);
+        resumeSupport.add(true);
+      },
+      wait: const Duration(milliseconds: 10),
+      verify: (bloc) => expect(bloc.state.uploadsRestartFromStart, isFalse),
     );
   });
 }

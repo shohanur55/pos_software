@@ -54,6 +54,7 @@ import '../../domain/usecases/transfers/start_download_use_case.dart';
 import '../../domain/usecases/transfers/start_upload_use_case.dart';
 import '../../domain/usecases/transfers/watch_transfer_notification_taps_use_case.dart';
 import '../../domain/usecases/transfers/watch_transfers_use_case.dart';
+import '../../domain/usecases/transfers/watch_upload_resume_support_use_case.dart';
 import '../../presentation/blocs/auth/auth_bloc.dart';
 import '../../presentation/blocs/connectivity/connectivity_cubit.dart';
 import '../../presentation/blocs/files/files_bloc.dart';

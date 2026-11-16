@@ -21,6 +21,7 @@ void _registerUseCases() {
     ..registerFactory(() => ClearFinishedTransfersUseCase(sl()))
     ..registerFactory(() => GetTransfersUseCase(sl()))
     ..registerFactory(() => WatchTransfersUseCase(sl()))
+    ..registerFactory(() => WatchUploadResumeSupportUseCase(sl()))
     ..registerFactory(() => ResyncTransfersUseCase(sl()))
     ..registerFactory(() => OpenTransferFileUseCase(sl()))
     ..registerFactory(() => WatchTransferNotificationTapsUseCase(sl()))

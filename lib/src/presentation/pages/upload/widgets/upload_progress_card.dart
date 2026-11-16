@@ -9,8 +9,10 @@ import '../../../blocs/transfer/transfer_bloc.dart';
 import '../../../theme/theme_extensions.dart';
 import '../../../utils/ui_messages.dart';
 import '../../../widgets/common/file_type_icon.dart';
+import '../../../widgets/transfer/confirm_pause.dart';
 import '../../../widgets/transfer/transfer_action.dart';
 import '../../../widgets/transfer/transfer_action_buttons.dart';
+import '../../../widgets/transfer/transfer_limit_note.dart';
 import '../../../widgets/transfer/transfer_progress_bar.dart';
 import '../../../widgets/transfer/transfer_stats_row.dart';
 import '../../../widgets/transfer/transfer_status_chip.dart';
@@ -22,12 +24,21 @@ class UploadProgressCard extends StatelessWidget {
 
   final TransferEntity transfer;
 
-  void _onAction(BuildContext context, TransferAction action) {
-    HapticFeedback.selectionClick();
+  Future<void> _onAction(
+    BuildContext context,
+    TransferAction action,
+    bool uploadsRestart,
+  ) async {
+    HapticFeedback.selectionClick().ignore();
     final bloc = context.read<TransferBloc>();
     switch (action) {
       case TransferAction.pause:
-        bloc.add(TransferPaused(transfer.id));
+        final go = await confirmPause(
+          context,
+          transfer: transfer,
+          serverCannotResumeUploads: uploadsRestart,
+        );
+        if (go) bloc.add(TransferPaused(transfer.id));
       case TransferAction.resume:
         bloc.add(TransferResumed(transfer.id));
       case TransferAction.cancel:
@@ -93,22 +104,26 @@ class UploadProgressCard extends StatelessWidget {
                     color: colors.warning,
                   ),
                 ],
-                if (UiMessages.pausedDetail(transfer) case final detail?) ...[
-                  SizedBox(height: context.spacing.md),
-                  BodySmallText(
-                    detail,
-                    color: transfer.resumesWhereItStopped
-                        ? colors.textSecondary
-                        : colors.warning,
-                    maxLines: 3,
+                BlocSelector<TransferBloc, TransferState, bool>(
+                  selector: (state) => state.uploadsRestartFromStart,
+                  builder: (context, uploadsRestart) => TransferLimitNote(
+                    transfer: transfer,
+                    serverCannotResumeUploads: uploadsRestart,
                   ),
-                ],
+                ),
                 Align(
                   alignment: AlignmentDirectional.centerEnd,
                   child: TransferActionButtons(
                     transfer: transfer,
                     exclude: const {TransferAction.open, TransferAction.remove},
-                    onAction: (action) => _onAction(context, action),
+                    onAction: (action) => _onAction(
+                      context,
+                      action,
+                      context
+                          .read<TransferBloc>()
+                          .state
+                          .uploadsRestartFromStart,
+                    ),
                   ),
                 ),
               ],

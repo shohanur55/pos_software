@@ -33,7 +33,7 @@ Before trusting a change:
 ```sh
 dart format .
 flutter analyze                 # should come back clean
-flutter test                    # 285 tests, no device needed
+flutter test                    # 322 tests, no device needed
 flutter build apk --debug
 ```
 
@@ -122,8 +122,9 @@ mutate the same transfer map, every mutation goes through one serialized queue.
 
 ## What I found when I tested against the real server
 
-I had an account from the web portal and ran these against the live server from an Android
-emulator:
+I had an account from the web portal and ran these against the live server — the early
+ones from an Android emulator, the range and resume probes below as direct HTTP calls so
+the exact status codes and headers are on the record:
 
 - `GET /get` without a token → `401 {"success": false, "error": "Missing token"}`.
   Good — the error shape is consistent, so the error mapper handles all 401s the same way.
@@ -135,20 +136,65 @@ emulator:
   renamed the file to `big_video_ef9f35e5.mp4`. That's why the uploaded file name is
   resolved from the response or the refreshed list rather than assumed. If the app trusted
   the name it sent, the Files tab would show a file that doesn't exist on the server.
-- `GET /get?file=NAME` → served the 60 MB file. Sent a `Range: bytes=X-` header mid-way
-  through and the server honoured it, so download pause/resume works against this server.
 - `GET /register` → `405`. Registration is server-rendered only; the app can't do it.
-- The upload size cap is the server's, and it's close to ours. Sending just a
-  `Content-Length` header (nginx rejects on the header, before reading a body) and
-  bisecting: `512 MB` → `100 Continue`, `600 MB` → `413`, boundary at roughly **520 MiB**.
-  The app's own 512 MiB limit sits just under it, so a file that passes validation is one
-  the server will accept — multipart overhead included. What this can't tell you is PHP's
-  `upload_max_filesize`, which sits behind nginx and could be lower; a 60 MB upload is the
-  largest I've actually confirmed end to end.
-- `POST /upload` with `Content-Range: bytes */<size>` and an empty body → not a `308`.
-  The endpoint has no resumable variant, which is what the upload resume probe exists to
-  find out and what it caches. `OPTIONS /upload` → `204`, which is what the reachability
-  probe uses: small, unauthenticated, and it proves the route without touching any data.
+
+The two questions the whole pause/resume design rests on are worth the exact answers,
+because guessing either one wrong changes what the app should promise. Both were asked of
+the live endpoint against a 294 MB file already sitting on the server.
+
+**Downloads can resume. Confirmed.**
+
+```
+GET /get?file=…                      200   accept-ranges: bytes
+                                           content-length: 294069727
+                                           etag: "568b3c37…"
+Range: bytes=1000000-1000099         206   content-range: bytes 1000000-1000099/294069727
+Range: bytes=293000000-              206   content-range: bytes 293000000-294069726/294069727
+```
+
+`Accept-Ranges` on the plain response, real `206 Partial Content` for both a mid-file slice
+and an open-ended tail, correct `Content-Range` each time, and a stable `ETag` across all
+three — which matters, because the plugin stores that ETag with the offset and uses it to
+notice if the file changed underneath a paused download. A paused download continuing from
+its byte offset is a measured fact here, not an assumption.
+
+**Uploads cannot. Also confirmed, from every angle I could find.**
+
+```
+POST /upload   Content-Range: bytes */1000, no body   400  "No file sent, use form field file"
+PATCH /upload                                         405  "Method not allowed, use POST"
+PUT   /upload                                         405  "Method not allowed, use POST"
+POST /upload   truncated body + Content-Range         413  nothing kept
+POST /upload   Content-Range: bytes */total (again)   400  no offset remembered
+```
+
+No `308`, no `Range` or `Upload-Offset` in any reply, and with `PATCH` and `PUT` both
+refused there is no room for tus either. The endpoint takes one complete multipart `POST`
+and nothing else. That is exactly the answer `UploadResumeProbe` gets at runtime and caches,
+and it is why the app says so on screen instead of pretending otherwise.
+
+That 413 also settled the size cap from the other side: **`post_max_size 520M`**, the
+server telling us in its own words. It matches the ~520 MiB boundary I'd found by bisecting
+`Content-Length` headers against nginx, so both layers agree and the app's 512 MiB limit
+sits just under both.
+
+One more thing the probe confirmed, about naming. A `POST /upload` of an 11-byte CSV came
+back `201` with:
+
+```json
+{"success": true, "message": "File uploaded",
+ "file": {"id": 108, "name": "resume_probe_6dff8cec_8bf173ad.csv",
+          "original_name": "resume_probe_6dff8cec.csv", "size": 11, …}}
+```
+
+The server renames every upload, and says so by keeping both names. The app reads `name`
+from that `file` object — never the name it sent — which is why the Files tab shows
+something that actually exists on the server. The list entries carry their own `url`, and
+that is the address a download uses rather than one built from the name. (`DELETE` tidied
+the probe file away afterwards; the server is as it was.)
+
+`OPTIONS /upload` → `204`, which is what the reachability probe uses: small,
+unauthenticated, and it proves the route without touching any data.
 
 About 25 hours after that login the app landed on the login screen on its own — the 24 h
 token had expired and the session check caught it.
@@ -223,8 +269,10 @@ storage first; only if the file can't be found anywhere does the row get marked 
 This is the part that matters most for a 500 MB catalog over shop Wi-Fi, so it is worth
 being precise about what survives an interruption and what doesn't.
 
-**Downloads continue from the byte they stopped at.** The partial file stays on disk and
-the resume sends `Range: bytes=X-`. That holds across app restarts: the plugin keeps the
+**Downloads continue from the byte they stopped at** — verified against this server, which
+answers `206 Partial Content` with a correct `Content-Range` and a stable `ETag` (the
+measurements are above). The partial file stays on disk and the resume sends
+`Range: bytes=X-`. That holds across app restarts: the plugin keeps the
 offset, and the app re-reads the token before resuming, because a download can sit paused
 for longer than a 24-hour token lives — resuming with the header the task was created with
 collects a 401 that looks like a resume failure and isn't one. If the server refuses the
@@ -240,18 +288,34 @@ On a yes, the resume sends only the bytes after the offset as a raw body with
 back to zero. On a no, the upload restarts and the operator is told why — "This server
 can't continue an interrupted upload, so it starts again from the beginning."
 
-The endpoint this ships against answers no: `POST /upload` is a single multipart form with
-no resumable variant, and there is no second endpoint to negotiate with. So in practice,
+The endpoint this ships against answers no, and I checked that from every angle rather
+than inferring it: no `308` to an offset request, `PATCH` and `PUT` both refused with
+"Method not allowed, use POST", a truncated body kept nothing, and a second offset request
+remembered nothing. `POST /upload` takes one complete multipart form and there is no second
+endpoint to negotiate with. So in practice,
 today, a paused upload does restart. What changed is that the app now *knows* that rather
-than assuming it, it says so before the operator commits to waiting, and pointing
-`Endpoints.baseUrl` at something that speaks the convention — tus, S3 multipart, Google's
-resumable protocol — turns real upload resume on with no other change. The verdict is
-cached per server, so an endpoint that has already said no is never asked again, and
-uploads smaller than 8 MB skip the question entirely because re-sending them costs less
-than the round trip.
+than assuming it, and pointing `Endpoints.baseUrl` at something that speaks the convention
+— tus, S3 multipart, Google's resumable protocol — turns real upload resume on with no
+other change. The verdict is cached per server, so an endpoint that has already said no is
+never asked again.
 
-A paused transfer always states what resuming will cost, while it is still paused and the
-decision is still open: *"Continues from 412.6 MB when resumed"* or *"Starts again from the
+**Because it's a server limitation, the app says so on screen rather than letting anyone
+find out the hard way.** The question is settled alongside the first upload, not the first
+pause, which is what makes that possible — one small request per server per install. Once
+the answer is no, every upload in flight carries a line saying *"This server can't continue
+an interrupted upload. Pausing or losing the connection means sending the file again from
+the beginning"*, and it is there while the upload is still **running**. Tapping Pause on
+one that has already sent something then asks first, naming the cost: *"This server can't
+continue an interrupted upload, so the 28.1 MB already sent will have to go again from the
+beginning."* Keep uploading, or pause anyway — but knowingly.
+
+None of that appears on a download, or on an upload to a server that can resume, or before
+the server has actually been asked. The app never blames an endpoint it hasn't talked to,
+and a confirmation nobody needs is just another tap: pausing a download is free, so it
+happens immediately.
+
+A paused transfer states what resuming will cost, while it is still paused and the decision
+is still open: *"Continues from 412.6 MB when resumed"* or *"Starts again from the
 beginning when resumed"*. That sentence is the whole point — an operator deciding whether
 to wait for the shop Wi-Fi or carry the terminal to the back office needs to know whether
 the 412 MB already sent survives the wait.
@@ -401,6 +465,35 @@ before the response arrives, the server has the file and the app doesn't know it
 for the offset answers that too — when it comes back equal to the file size the upload is
 marked complete instead of being re-sent.
 
+**A paused download hedged about work it had already saved, and panicked about work
+it hadn't.** Whether a resume keeps its place is driven by `canPauseNatively`, which was
+only ever set by an optimistic probe when the download started running. Pause it before
+that probe answered and the row warned *"Starts again from the beginning when resumed"* —
+about a partial file that was sitting safely on disk. The native side only ever reports a
+download as paused once the temp file, the byte offset and the ETag are written down, so
+that event is proof rather than a guess, and the row now takes it as such.
+
+The opposite case was worse. When a server refuses the range, the pause genuinely cannot
+be honoured and the plugin fails the task — so pressing Pause produced a red **Failed** row
+saying "Couldn't continue where it stopped. Starting again from the beginning", which had
+not happened and wouldn't until someone tapped Retry. Nothing had gone wrong; the operator
+asked for a pause and got one. The row now stays paused, drops its claim about keeping its
+place, and offers Resume, which starts the file again — which is what the words said all
+along.
+
+**A server limitation was being reported as an apology, after the fact.** Pause an upload,
+resume it, and a snackbar said the server couldn't continue it and the file would start
+again — which was true, and far too late. By then the operator had already paused a
+300 MB upload and lost it. The information existed; it was just delivered at the only
+moment it was useless.
+
+The probe used to run only when someone resumed, so until then the app genuinely didn't
+know. It now asks alongside the *first* upload instead, which costs one small request per
+server per install and means the answer is on screen before anyone makes a decision based
+on it: a line on every running upload, and a confirmation naming the exact cost when Pause
+is tapped. The snackbar is still there for the case where someone pauses anyway — but it's
+no longer where the news breaks.
+
 **A big upload could lose the file it was reading from.** The file picker doesn't hand
 back the file you chose — it hands back a copy it wrote into the app's *cache* directory,
 and Android is free to purge that whenever storage runs short. That's fine for a 2 MB CSV
@@ -429,7 +522,7 @@ failed comparison and had been checked in. Deleted and ignored.
 
 ## Tests
 
-`flutter test` runs 285 tests and needs no device.
+`flutter test` runs 322 tests and needs no device.
 
 Unit tests cover the parsers (every documented response shape plus malformed input — the
 mock API is loosely specified so the parsers are deliberately tolerant), upload validation,
@@ -449,7 +542,15 @@ alone when the connection returns; a download that can't pause in place is parke
 cancelling it instead; an upload the server can't continue starts over and says so; one it
 can continue keeps its progress; one the server already holds in full is completed rather
 than re-sent; and a connection flapping five times restarts the same upload three times,
-not five. A second set covers the upload's working file against real directories (with
+not five. What the operator is told has its own tests, because copy that only appears in the wrong
+situation is worse than none: the warning shows on a *running* upload once the server has
+said no, stays when it is paused, never appears on a download, and never appears before the
+server has been asked — at both text scales, with a long file name, checked for overflow.
+The pause confirmation is covered the same way: it asks for an upload that would start
+over, is skipped entirely for a download, for an upload with nothing sent yet, and for a
+server nobody has asked, and both answers are followed through.
+
+A second set covers the upload's working file against real directories (with
 `path_provider` standing in for the platform ones): a picked copy is moved out of the
 cache rather than copied, a file the operator owns is left exactly where it is and is
 never deleted, two uploads of the same name don't collide, and a prune drops the orphans
@@ -467,6 +568,23 @@ Every bloc has `bloc_test` coverage with mocked repositories and real use cases:
 `AuthBloc` (session restore, login, logout, the expiry timer), `TransferBloc` (history,
 live updates, ordering, derived counters, auto-retry, and what the operator is told when a
 transfer is parked by the network and when it picks up again), `UploadBloc`, `FilesBloc`.
+
+`download_flow_test.dart` walks the download module through the real UI the way an
+operator meets it: a file in the list, the button that fetches it using the address the
+list endpoint returned rather than one the app guessed, the bar and the percentage landing
+on the row that was tapped, the same transfer visible from another tab through the
+persistent banner and listed in the dashboard, and — when it finishes — where on the device
+the file ended up. The failure half checks that a dead network, a server fault and a
+deleted file each produce a sentence a cashier can act on with a Retry next to it, and that
+no status code ever reaches the screen.
+
+`notification_tap_test.dart` drives the one path that is easy to believe works and easy to
+get wrong. It checks where a tap decides to go (a finished upload to the file list it just
+changed, anything else to its own row in Transfers — a failure notification that landed on
+Files would show no sign of what went wrong), that a running app actually moves there, that
+tapping the same notification twice moves again rather than treating it as the same
+destination, and that a tap arriving on the login screen is held and spent exactly once
+after signing in rather than jumping past authentication.
 
 Above those, `app_flow_test.dart` drives the real app with mocked repositories through the
 flows that matter: offline fallback, recovery on reconnect, the permission prompt, an
@@ -510,9 +628,10 @@ should still be running.
 
 Pause and resume a download, and then pause it again, restart the app and resume — the
 partial file should be kept and the resume should continue from where it left off, with the
-paused row stating the position beforehand. Pause an upload and confirm the row says it
-will start again from the beginning *before* you resume it, then resume and confirm the
-snackbar explains that this server can't continue an interrupted upload.
+paused row stating the position beforehand. With an upload running, confirm the row already warns
+that this server can't continue an interrupted upload — before you touch Pause. Tap Pause
+and confirm the dialog names how much has been sent; choose Keep uploading and check it
+really does keep going.
 
 To see the resumable-upload path actually run you need an endpoint that answers the offset
 request. Point `Endpoints.baseUrl` at a tus server (`tusd -behind-proxy`) or anything else
@@ -551,9 +670,10 @@ For network throttling on the emulator: Extended controls → Cellular → Netwo
 
 ## What isn't finished
 
-**Uploads to this server still restart from zero when interrupted.** The negotiation, the
-offset plumbing and the honest messaging are all in place and tested; what's missing is a
-server that answers the question. It's a constraint of the API, not the app, and it stops
+**Uploads to this server still restart from zero when interrupted.** Not a guess — the
+live endpoint was asked four different ways and kept nothing each time (the transcript is
+above). The negotiation, the offset plumbing and the honest messaging are all in place and
+tested; what's missing is a server that answers the question. It's a constraint of the API, not the app, and it stops
 being one the day the endpoint speaks any of the standard resumable protocols.
 
 **It's HTTP, not HTTPS.** Cleartext is enabled on both platforms only because the provided

@@ -9,6 +9,7 @@ import 'package:pos_software/src/domain/entities/notification_permission_status.
 import 'package:pos_software/src/domain/entities/remote_file_entity.dart';
 import 'package:pos_software/src/domain/entities/remote_files_snapshot.dart';
 import 'package:pos_software/src/domain/entities/transfer_entity.dart';
+import 'package:pos_software/src/domain/entities/transfer_notification_tap_entity.dart';
 import 'package:pos_software/src/domain/services/connectivity_service.dart';
 import 'package:pos_software/src/domain/usecases/auth/get_session_use_case.dart';
 import 'package:pos_software/src/domain/usecases/auth/login_use_case.dart';
@@ -34,13 +35,16 @@ import 'package:pos_software/src/domain/usecases/transfers/resync_transfers_use_
 import 'package:pos_software/src/domain/usecases/transfers/retry_transfer_use_case.dart';
 import 'package:pos_software/src/domain/usecases/transfers/start_download_use_case.dart';
 import 'package:pos_software/src/domain/usecases/transfers/start_upload_use_case.dart';
+import 'package:pos_software/src/domain/usecases/transfers/watch_transfer_notification_taps_use_case.dart';
 import 'package:pos_software/src/domain/usecases/transfers/watch_transfers_use_case.dart';
+import 'package:pos_software/src/domain/usecases/transfers/watch_upload_resume_support_use_case.dart';
 import 'package:pos_software/src/presentation/blocs/auth/auth_bloc.dart';
 import 'package:pos_software/src/presentation/blocs/connectivity/connectivity_cubit.dart';
 import 'package:pos_software/src/presentation/blocs/files/files_bloc.dart';
 import 'package:pos_software/src/presentation/blocs/notification_permission/notification_permission_cubit.dart';
 import 'package:pos_software/src/presentation/blocs/transfer/transfer_bloc.dart';
 import 'package:pos_software/src/presentation/blocs/upload/upload_bloc.dart';
+import 'package:pos_software/src/presentation/router/app_navigation_service.dart';
 import 'package:pos_software/src/presentation/router/router.dart';
 
 import 'mocks.dart';
@@ -58,6 +62,10 @@ class TestApp {
   final MockConnectivityService connectivity = MockConnectivityService();
   final StreamController<TransferEntity> updates =
       StreamController<TransferEntity>.broadcast();
+
+  /// Stands in for the native side delivering a system-tray notification tap.
+  final StreamController<TransferNotificationTapEntity> notificationTaps =
+      StreamController<TransferNotificationTapEntity>.broadcast();
 
   /// Applied to each new [UploadBloc], to put the Upload tab in a given state.
   UploadState? uploadSeed;
@@ -92,6 +100,11 @@ class TestApp {
     when(() => transfers.watchTransfers()).thenAnswer((_) => updates.stream);
     when(() => transfers.watchRemovedTransfers())
         .thenAnswer((_) => const Stream.empty());
+    when(() => transfers.watchUploadResumeSupport())
+        .thenAnswer((_) => const Stream.empty());
+    when(() => transfers.uploadResumeSupport).thenReturn(null);
+    when(() => transfers.watchNotificationTaps())
+        .thenAnswer((_) => notificationTaps.stream);
     when(() => transfers.notificationPermissionStatus())
         .thenAnswer((_) async => Success(permission));
     when(() => transfers.cancelAllActive())
@@ -121,6 +134,7 @@ class TestApp {
         () => TransferBloc(
           getTransfers: GetTransfersUseCase(transfers),
           watchTransfers: WatchTransfersUseCase(transfers),
+          watchUploadResumeSupport: WatchUploadResumeSupportUseCase(transfers),
           resyncTransfers: ResyncTransfersUseCase(transfers),
           startDownload: StartDownloadUseCase(transfers),
           pauseTransfer: PauseTransferUseCase(transfers),
@@ -162,11 +176,19 @@ class TestApp {
           DeleteRemoteFileUseCase(files),
         ),
       )
-      ..registerLazySingleton<AppRouter>(() => AppRouter(sl()));
+      ..registerLazySingleton<AppRouter>(() => AppRouter(sl()))
+      ..registerLazySingleton<AppNavigationService>(
+        () => AppNavigationService(
+          sl(),
+          sl(),
+          WatchTransferNotificationTapsUseCase(transfers),
+        ),
+      );
   }
 
   /// Mirrors what `main()` dispatches before `runApp`.
   Future<void> start() async {
+    sl<AppNavigationService>().start();
     sl<AuthBloc>().add(const AppStarted());
     sl<TransferBloc>().add(const TransfersStarted());
     await sl<ConnectivityCubit>().start();
@@ -183,7 +205,9 @@ class TestApp {
     unawaited(sl<TransferBloc>().close());
     unawaited(sl<ConnectivityCubit>().close());
     unawaited(sl<NotificationPermissionCubit>().close());
+    unawaited(sl<AppNavigationService>().dispose());
     unawaited(sl.reset(dispose: false));
     unawaited(updates.close());
+    unawaited(notificationTaps.close());
   }
 }

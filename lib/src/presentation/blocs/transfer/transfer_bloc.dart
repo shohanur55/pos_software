@@ -20,6 +20,7 @@ import '../../../domain/usecases/transfers/resync_transfers_use_case.dart';
 import '../../../domain/usecases/transfers/retry_transfer_use_case.dart';
 import '../../../domain/usecases/transfers/start_download_use_case.dart';
 import '../../../domain/usecases/transfers/watch_transfers_use_case.dart';
+import '../../../domain/usecases/transfers/watch_upload_resume_support_use_case.dart';
 import '../common/ui_notice.dart';
 
 part 'transfer_event.dart';
@@ -30,6 +31,7 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
   TransferBloc({
     required this._getTransfers,
     required this._watchTransfers,
+    required WatchUploadResumeSupportUseCase watchUploadResumeSupport,
     required this._resyncTransfers,
     required this._startDownload,
     required this._pauseTransfer,
@@ -39,7 +41,12 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
     required this._removeTransfer,
     required this._clearFinished,
     required this._openFile,
-  }) : super(const TransferState()) {
+  }) : _watchUploadResumeSupport = watchUploadResumeSupport,
+       super(
+         TransferState(
+           uploadResumeSupported: watchUploadResumeSupport.current(),
+         ),
+       ) {
     on<TransfersStarted>(_onStarted);
     on<TransfersResynced>(_onResynced);
     on<DownloadStarted>(_onDownloadStarted);
@@ -66,6 +73,7 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
 
   final GetTransfersUseCase _getTransfers;
   final WatchTransfersUseCase _watchTransfers;
+  final WatchUploadResumeSupportUseCase _watchUploadResumeSupport;
   final ResyncTransfersUseCase _resyncTransfers;
   final StartDownloadUseCase _startDownload;
   final PauseTransferUseCase _pauseTransfer;
@@ -110,7 +118,8 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
 
     final changes = _watchTransfers()
         .map<_Change>(_Updated.new)
-        .merge(_watchTransfers.removed().map(_Removed.new));
+        .merge(_watchTransfers.removed().map(_Removed.new))
+        .merge(_watchUploadResumeSupport().map(_ResumeSupport.new));
     await emit.onEach<_Change>(
       changes,
       onData: (change) => switch (change) {
@@ -121,6 +130,9 @@ class TransferBloc extends Bloc<TransferEvent, TransferState> {
                 .where((transfer) => transfer.id != id)
                 .toList(),
           ),
+        ),
+        _ResumeSupport(:final supported) => emit(
+          state.copyWith(uploadResumeSupported: supported),
         ),
       },
     );
@@ -365,4 +377,10 @@ final class _Removed extends _Change {
   const _Removed(this.id);
 
   final String id;
+}
+
+final class _ResumeSupport extends _Change {
+  const _ResumeSupport(this.supported);
+
+  final bool? supported;
 }
